@@ -1,0 +1,13 @@
+/* App.module.css — Layout raíz de la aplicación */
+
+.layout {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-background-tertiary);
+}
+
+.main {
+  flex: 1;
+  padding: 32px 36px;
+  overflow-y: auto;
+}

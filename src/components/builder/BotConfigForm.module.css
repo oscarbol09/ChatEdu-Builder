@@ -1,0 +1,97 @@
+/* BotConfigForm.module.css — Estilos del formulario de configuración (Paso 2) */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Layout ── */
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── Etiquetas ── */
+.label {
+  font-family: var(--font-heading);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Controles de formulario ── */
+.input,
+.select,
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 0.5px solid var(--color-border-secondary);
+  border-radius: 8px;
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  transition: border-color 0.2s;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--color-brand-500);
+}
+
+.textarea {
+  resize: vertical;
+}
+
+/* ── Radio group de restricciones ── */
+.radioGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radioOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.radioOption:hover {
+  border-color: var(--color-brand-500);
+}
+
+.radioOptionSelected {
+  border-color: var(--color-brand-500);
+  background: var(--color-brand-50);
+}
+
+.radioInput {
+  accent-color: var(--color-brand-500);
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.radioLabel {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+}

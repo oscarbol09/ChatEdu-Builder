@@ -1,0 +1,114 @@
+/* UploadZone.module.css — Zona de carga de archivos (Paso 1) */
+
+/* ── Zona de drop ────────────────────────────────────────────────────────── */
+.dropZone {
+  border: 2px dashed var(--color-border-secondary);
+  border-radius: var(--radius-xl);
+  padding: 40px 24px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--color-background-secondary);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.dropZone:hover,
+.dropZoneActive {
+  border-color: var(--color-brand-indigo-mid);
+  background: var(--color-brand-indigo-light);
+}
+
+.fileInput {
+  display: none;
+}
+
+.uploadIcon {
+  display: block;
+  margin: 0 auto 12px;
+  stroke: var(--color-brand-indigo-mid);
+}
+
+.dropTitle {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 6px;
+}
+
+.dropHint {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+/* ── Lista de archivos ───────────────────────────────────────────────────── */
+.fileList {
+  list-style: none;
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+}
+
+.fileItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--color-background-primary);
+  border: 0.5px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+}
+
+.fileIcon {
+  stroke: var(--color-brand-teal-mid);
+  flex-shrink: 0;
+}
+
+.fileMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+.fileName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fileSize {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.fileStatus {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-brand-teal-light);
+  color: var(--color-brand-teal-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.removeBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s;
+}
+
+.removeBtn:hover {
+  color: var(--color-text-secondary);
+}

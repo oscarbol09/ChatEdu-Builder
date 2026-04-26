@@ -1,0 +1,153 @@
+/* Analytics.module.css — Estilos de la vista de analítica */
+
+.wrapper {
+  max-width: 700px;
+}
+
+/* ── Botón volver ── */
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  padding: 0;
+  margin-bottom: 20px;
+  transition: color 0.2s;
+}
+
+.backBtn:hover {
+  color: var(--color-text-primary);
+}
+
+/* ── Cabecera ── */
+.header {
+  margin-bottom: 24px;
+}
+
+.title {
+  margin: 0 0 6px;
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+
+.subtitle {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* ── Card principal ── */
+.card {
+  background: var(--color-background-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: 16px;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── KPIs ── */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.kpi {
+  background: var(--color-background-secondary);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.kpiLabel {
+  margin: 0 0 4px;
+  font-family: var(--font-heading);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.kpiValue {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+/* ── Sección compartida ── */
+.sectionTitle {
+  margin: 0 0 10px;
+  font-family: var(--font-heading);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* ── Gráfico de barras ── */
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 80px;
+}
+
+.barCol {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.bar {
+  width: 100%;
+  background: var(--color-brand-500);
+  border-radius: 4px 4px 0 0;
+  opacity: 0.45;
+  transition: height 0.5s ease;
+}
+
+.barActive {
+  opacity: 1;
+}
+
+.dayLabel {
+  font-family: var(--font-body);
+  font-size: 9px;
+  color: var(--color-text-tertiary);
+}
+
+/* ── Lagunas conceptuales ── */
+.gapItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.gapDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-amber-500);
+  flex-shrink: 0;
+}
+
+.gapText {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+}

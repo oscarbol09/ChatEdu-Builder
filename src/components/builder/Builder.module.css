@@ -1,0 +1,107 @@
+/* Builder.module.css — Estilos del orquestador del wizard */
+
+.wrapper {
+  max-width: 740px;
+  margin: 0 auto;
+}
+
+/* ── Cabecera ── */
+.header {
+  margin-bottom: 28px;
+}
+
+.title {
+  margin: 0 0 6px;
+  font-family: var(--font-heading);
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+
+.subtitle {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+/* ── Card del paso activo ── */
+.card {
+  background: var(--color-background-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: 16px;
+  padding: 28px 32px;
+}
+
+.stepTitle {
+  margin: 0 0 6px;
+  font-family: var(--font-heading);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.stepDesc {
+  margin: 0 0 20px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* ── Navegación ── */
+.nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+
+.backBtn {
+  padding: 10px 24px;
+  background: none;
+  border: 0.5px solid var(--color-border-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  transition: background 0.2s;
+}
+
+.backBtn:hover {
+  background: var(--color-background-secondary);
+}
+
+.nextBtn {
+  padding: 10px 28px;
+  background: var(--color-brand-500);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: var(--font-heading);
+  font-size: 13px;
+  font-weight: 700;
+  transition: opacity 0.2s;
+}
+
+.nextBtnDisabled {
+  background: var(--color-border-tertiary);
+  cursor: not-allowed;
+}
+
+.finishBtn {
+  padding: 10px 28px;
+  background: var(--color-teal-500);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: var(--font-heading);
+  font-size: 13px;
+  font-weight: 700;
+  transition: opacity 0.2s;
+}
+
+.finishBtn:hover {
+  opacity: 0.9;
+}

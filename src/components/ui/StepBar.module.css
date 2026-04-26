@@ -1,0 +1,82 @@
+/* StepBar.module.css — Indicador de progreso del wizard */
+
+.wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 32px;
+}
+
+/* ── Contenedor de cada paso ──────────────────────────────────────────────── */
+.stepContainer {
+  display: flex;
+  align-items: center;
+}
+
+/* El flex solo aplica a los pasos que tienen conector a la derecha */
+.stepContainerFlex {
+  flex: 1;
+}
+
+.stepBody {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Círculo numerado ─────────────────────────────────────────────────────── */
+.circle {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-heading);
+  font-size: 13px;
+  font-weight: 600;
+  border: 2px solid var(--color-border-secondary);
+  background: var(--color-background-secondary);
+  color: var(--color-text-tertiary);
+  transition: background 0.3s, border-color 0.3s, color 0.3s;
+}
+
+.circleActive {
+  background: var(--color-brand-indigo-mid);
+  border-color: var(--color-brand-indigo-mid);
+  color: #fff;
+}
+
+.circleDone {
+  background: var(--color-brand-teal-mid);
+  border-color: var(--color-brand-teal-mid);
+  color: #fff;
+}
+
+/* ── Etiqueta de texto ────────────────────────────────────────────────────── */
+.label {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.labelActive {
+  color: var(--color-brand-indigo-mid);
+  font-weight: 600;
+}
+
+/* ── Línea conectora ─────────────────────────────────────────────────────── */
+.connector {
+  flex: 1;
+  height: 2px;
+  background: var(--color-border-secondary);
+  margin: 0 8px;
+  margin-bottom: 22px; /* compensa la altura de la etiqueta */
+  transition: background 0.3s;
+}
+
+.connectorDone {
+  background: var(--color-brand-teal-mid);
+}
