@@ -77,7 +77,7 @@ Estas reglas no deben violarse bajo ningún pretexto. Cualquier PR que las incum
 
 ## Modelo de IA
 
-El modelo activo es `gemini-2.5-flash` (free tier de Google AI Studio, sin tarjeta de crédito).
+El modelo activo es `gemini-2.0-flash` (free tier de Google AI Studio, sin tarjeta de crédito).
 La constante `GEMINI_MODEL` en `src/constants/index.js` es la única fuente de verdad.
 
 Free tier actual:

@@ -3,7 +3,7 @@
  * Recibe initialBot para modo edición (desde "Configurar") o null para creación nueva.
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import styles from './Builder.module.css';
 import StepBar from '../ui/StepBar.jsx';
 import UploadZone from './UploadZone.jsx';
@@ -15,10 +15,11 @@ import { DEFAULT_BOT_CONFIG } from '../../constants/index.js';
 /**
  * @param {Object} props
  * @param {Object|null} props.initialBot - Bot existente para editar, o null para crear nuevo.
- * @param {(config: Object, docsCount: number) => void} props.onFinish
+ * @param {(config: Object, files: Array) => void} props.onFinish - Callback al crear nuevo.
+ * @param {(botId: number, config: Object, files: Array) => void} props.onUpdate - Callback al actualizar.
  * @param {() => void} props.onCancel
  */
-export default function Builder({ initialBot, onFinish, onCancel }) {
+export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
   const [step, setStep] = useState(0);
   const [files, setFiles] = useState([]);
 
@@ -39,6 +40,31 @@ export default function Builder({ initialBot, onFinish, onCancel }) {
 
   const isEditMode = Boolean(initialBot);
 
+  /** Carga los archivos del bot existente al editar. */
+  useEffect(() => {
+    if (initialBot && initialBot.files) {
+      setFiles(initialBot.files);
+    } else if (!initialBot) {
+      setFiles([]);
+    }
+  }, [initialBot]);
+
+  /** Actualiza el formulario cuando cambia el bot a editar (after mount). */
+  useEffect(() => {
+    if (initialBot) {
+      setConfig({
+        name:        initialBot.name        || '',
+        subject:     initialBot.subject     || 'Matemáticas',
+        level:       initialBot.level       || 'Universitario',
+        tone:        initialBot.tone        || 'Amigable y cercano',
+        welcome:     initialBot.welcome     || '',
+        restriction: initialBot.restriction || 'guided',
+      });
+    } else {
+      setConfig(DEFAULT_BOT_CONFIG);
+    }
+  }, [initialBot]);
+
   const canNext = () => {
     if (step === 0) return files.length > 0;
     if (step === 1) return config.name.trim().length > 0;
@@ -46,7 +72,11 @@ export default function Builder({ initialBot, onFinish, onCancel }) {
   };
 
   const handleFinish = () => {
-    onFinish(config, files.length);
+    if (isEditMode && onUpdate) {
+      onUpdate(initialBot.id, config, files);
+    } else if (onFinish) {
+      onFinish(config, files);
+    }
     setStep(0);
     setFiles([]);
     setConfig(DEFAULT_BOT_CONFIG);

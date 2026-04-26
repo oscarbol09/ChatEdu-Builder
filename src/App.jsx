@@ -10,10 +10,16 @@ import Dashboard from './components/dashboard/Dashboard.jsx';
 import Builder from './components/builder/Builder.jsx';
 import Analytics from './components/analytics/Analytics.jsx';
 import { useState } from 'react';
+import { AuthProvider, useAuth } from './auth/AuthContext.jsx';
+import Login from './pages/Login.jsx';
 
-export default function App() {
+function AppInner() {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) {
+    return <Login />;
+  }
   const [view, setView] = useState('dashboard');
-  const { bots, selectedBot, setSelectedBot, addBot } = useBots();
+  const { bots, selectedBot, setSelectedBot, addBot, updateBot } = useBots();
 
   /** Bot que se está editando; null = creación nueva. */
   const [botToEdit, setBotToEdit] = useState(null);
@@ -33,8 +39,14 @@ export default function App() {
     setView('builder');
   };
 
-  const handleFinish = (config, docsCount) => {
-    addBot(config, docsCount);
+  const handleFinish = (config, files) => {
+    addBot(config, files);
+    setBotToEdit(null);
+    setView('dashboard');
+  };
+
+  const handleUpdateBot = (botId, config, files) => {
+    updateBot(botId, { ...config, files });
     setBotToEdit(null);
     setView('dashboard');
   };
@@ -62,6 +74,7 @@ export default function App() {
           <Builder
             initialBot={botToEdit}
             onFinish={handleFinish}
+            onUpdate={handleUpdateBot}
             onCancel={handleCancel}
           />
         )}
@@ -74,5 +87,13 @@ export default function App() {
         )}
       </main>
     </div>
+  );
+}
+ 
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppInner />
+    </AuthProvider>
   );
 }

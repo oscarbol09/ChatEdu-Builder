@@ -1,56 +1,128 @@
 /**
- * @fileoverview Hook de estado global para la gestión de chatbots.
- *
- * Centraliza el estado de la lista de bots y el bot seleccionado,
- * que es compartido entre las vistas Dashboard y Analytics (AGENT.md §4).
- * Las vistas no modifican el estado de bots directamente; llaman a las
- * funciones expuestas por este hook.
+ * @fileoverview Hook de estado para gestión de chatbots.
+ * Usa Cosmos DB si está disponible, si no usa datos locales.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { MOCK_BOTS } from '../data/mockData.js';
 import { COLORS } from '../constants/index.js';
+import { getBots as getBotsDB, createBot as createBotDB, updateBot as updateBotDB, initDB } from '../services/db.js';
 
-/**
- * Gestiona el CRUD de chatbots y la selección activa para analítica.
- *
- * @returns {{
- *   bots: Array<Object>,
- *   selectedBot: Object|null,
- *   setSelectedBot: React.Dispatch,
- *   addBot: (config: Object, docsCount: number) => void
- * }}
- */
+let dbInitialized = false;
+
 export function useBots() {
-  /** Lista de bots. Inicializada con datos mock para demo. */
-  const [bots, setBots] = useState(MOCK_BOTS);
-
-  /** Bot actualmente seleccionado para ver su analítica. */
+  const [bots, setBots] = useState([]);
   const [selectedBot, setSelectedBot] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  /**
-   * Crea un nuevo bot a partir de la configuración del wizard y lo agrega al inicio de la lista.
-   *
-   * @param {Object} config - Configuración completada en el wizard.
-   * @param {string} config.name - Nombre del chatbot.
-   * @param {string} config.subject - Asignatura.
-   * @param {string} config.level - Nivel educativo.
-   * @param {number} docsCount - Número de documentos cargados en el Paso 1.
-   */
-  const addBot = useCallback((config, docsCount) => {
-    /** @type {Object} Nueva entrada de bot construida desde el wizard. */
-    const newBot = {
-      id:      Date.now(),
-      name:    config.name,
-      subject: config.subject,
-      level:   config.level,
-      docs:    docsCount,
-      queries: 0,
-      active:  true,
-      color:   COLORS.indigo.mid,
-    };
-    setBots((prev) => [newBot, ...prev]);
+  useEffect(() => {
+    async function loadBots() {
+      console.log('🔄 Iniciando base de datos...');
+      if (!dbInitialized) {
+        try {
+          await initDB();
+          dbInitialized = true;
+          console.log('✅ DB inicializada');
+        } catch (e) {
+          console.warn('⚠️ Cosmos DB no disponible:', e.message);
+        }
+      }
+
+      try {
+        console.log('🔄 Obteniendo bots de Cosmos DB...');
+        const remoteBots = await getBotsDB();
+        console.log('📥 Bots obtenidos:', remoteBots);
+        if (remoteBots && remoteBots.length > 0) {
+          setBots(remoteBots);
+        } else {
+          console.log('📦 No hay bots remotos, usando MOCK_BOTS');
+          setBots(MOCK_BOTS);
+        }
+      } catch (e) {
+        console.warn('⚠️ Error cargando bots:', e.message);
+        setBots(MOCK_BOTS);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadBots();
   }, []);
 
-  return { bots, selectedBot, setSelectedBot, addBot };
+  const addBot = useCallback(async (config, files) => {
+    const newBot = {
+      id: Date.now().toString(),
+      name: config.name,
+      subject: config.subject,
+      level: config.level,
+      tone: config.tone,
+      welcome: config.welcome,
+      restriction: config.restriction,
+      docs: files?.length || 0,
+      files: files || [],
+      queries: 0,
+      active: true,
+      color: COLORS.indigo.mid,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (dbInitialized) {
+      try {
+        await createBotDB(newBot);
+      } catch (e) {
+        console.error('❌ Error guardando en BD:', e.message);
+      }
+    }
+
+    setBots((prev) => [newBot, ...prev]);
+    return newBot;
+  }, []);
+
+  const updateBot = useCallback(async (botId, updates) => {
+    const updatedData = {
+      ...updates,
+      id: botId,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (dbInitialized) {
+      try {
+        await updateBotDB(botId, updatedData);
+      } catch (e) {
+        console.error('❌ Error actualizando en BD:', e.message);
+      }
+    }
+
+    setBots((prev) => prev.map((bot) => {
+      if (bot.id === botId) {
+        return { ...bot, ...updatedData };
+      }
+      return bot;
+    }));
+  }, []);
+
+  const refreshBots = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const remoteBots = await getBotsDB();
+      if (remoteBots && remoteBots.length > 0) {
+        setBots(remoteBots);
+      }
+    } catch (e) {
+      console.warn('⚠️ Error refresh:', e.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { 
+    bots, 
+    selectedBot, 
+    setSelectedBot, 
+    addBot, 
+    updateBot,
+    refreshBots,
+    isLoading 
+  };
 }
