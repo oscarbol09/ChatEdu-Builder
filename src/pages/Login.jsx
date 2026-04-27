@@ -2,16 +2,20 @@
  * @fileoverview Pantalla de inicio de sesión y registro.
  *
  * Modos:
- *   'login'    — Inicia sesión con email y rol (verifica contra BD si está disponible).
- *   'register' — Crea una cuenta nueva. Bloquea el rol 'docente' con un aviso explícito.
+ *   'login'    — Inicia sesión con email, contraseña y rol.
+ *   'register' — Crea una cuenta nueva. Bloquea el rol 'docente'.
+ *
+ * CAMBIOS (v0.3.0):
+ * - Se añade campo de contraseña al modo login. Necesario para que el usuario
+ *   admin/admin (TEST_ADMIN en AuthContext) pueda autenticarse correctamente.
+ *   En modo demo (BD no disponible) la contraseña no se valida para cuentas
+ *   regulares, solo para admin.
  *
  * CAMBIOS (v0.2.0):
  * - Separación en dos modos con tabs: Iniciar sesión / Crear cuenta.
- * - El rol 'Docente / Profesor' en modo registro muestra el aviso de restricción
- *   y deshabilita el botón de envío. La validación también ocurre en AuthContext.jsx.
+ * - El rol 'Docente / Profesor' en modo registro muestra el aviso de restricción.
  * - Campos añadidos al registro: Nombre (opcional).
- * - Manejo de estado `loading` para bloquear doble envío durante llamadas async.
- * - Todos los estilos siguen Login.module.css (sin style inline).
+ * - Manejo de estado `loading` para bloquear doble envío.
  *
  * NOTA DE PRODUCCIÓN:
  * Reemplazar por Microsoft Entra ID (@azure/msal-react).
@@ -26,13 +30,14 @@ export default function Login() {
   const { login, register } = useAuth();
 
   /** 'login' | 'register' */
-  const [mode, setMode] = useState('login');
+  const [mode,     setMode]     = useState('login');
 
-  const [email,   setEmail]   = useState('');
-  const [name,    setName]    = useState('');
-  const [role,    setRole]    = useState('estudiante');
-  const [err,     setErr]     = useState('');
-  const [loading, setLoading] = useState(false);
+  const [email,    setEmail]    = useState('');
+  const [password, setPassword] = useState('');
+  const [name,     setName]     = useState('');
+  const [role,     setRole]     = useState('estudiante');
+  const [err,      setErr]      = useState('');
+  const [loading,  setLoading]  = useState(false);
 
   /** En modo registro y con rol restringido mostramos el aviso, no el error genérico. */
   const isRestrictedRole = mode === 'register' && role === 'docente';
@@ -41,11 +46,12 @@ export default function Login() {
     setMode(newMode);
     setErr('');
     setRole('estudiante');
+    setPassword('');
   };
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (isRestrictedRole) return; // doble guarda — el botón ya está deshabilitado
+    if (isRestrictedRole) return;
 
     setErr('');
     if (!email.trim()) {
@@ -58,7 +64,7 @@ export default function Login() {
       if (mode === 'register') {
         await register({ email: email.trim(), name: name.trim(), role });
       } else {
-        await login({ email: email.trim(), role });
+        await login({ email: email.trim(), role, password });
       }
     } catch (error) {
       setErr(error.message);
@@ -99,7 +105,7 @@ export default function Login() {
           </button>
         </div>
 
-        {/* ── Error genérico (no se muestra si ya está el aviso de restricción) ── */}
+        {/* ── Error genérico ── */}
         {err && !isRestrictedRole && (
           <p className={styles.error}>{err}</p>
         )}
@@ -111,15 +117,33 @@ export default function Login() {
           </label>
           <input
             id="email"
-            type="email"
+            type={mode === 'login' ? 'text' : 'email'}
             className={styles.input}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            placeholder="usuario@ejemplo.com"
+            autoComplete="username"
+            placeholder={mode === 'login' ? 'usuario@ejemplo.com o admin' : 'usuario@ejemplo.com'}
             required
           />
         </div>
+
+        {/* ── Contraseña (solo en login) ── */}
+        {mode === 'login' && (
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="password">
+              Contraseña
+            </label>
+            <input
+              id="password"
+              type="password"
+              className={styles.input}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              placeholder="••••••••"
+            />
+          </div>
+        )}
 
         {/* ── Nombre (solo en registro) ── */}
         {mode === 'register' && (
@@ -155,7 +179,7 @@ export default function Login() {
           </select>
         </div>
 
-        {/* ── Aviso de restricción para docentes (solo en modo registro) ── */}
+        {/* ── Aviso de restricción para docentes ── */}
         {isRestrictedRole && (
           <div className={styles.notice} role="alert">
             <svg
@@ -187,7 +211,7 @@ export default function Login() {
         {/* ── Nota demo ── */}
         <p className={styles.disclaimer}>
           {mode === 'login'
-            ? 'Demo: cualquier correo es válido. En producción se usará autenticación institucional.'
+            ? 'Demo: usa admin / admin para acceso de testeo. En producción se usará autenticación institucional.'
             : 'Las cuentas de Estudiante se guardan en Azure Cosmos DB.'}
         </p>
       </form>

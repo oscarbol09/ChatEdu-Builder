@@ -83,6 +83,28 @@ Estas reglas no deben violarse bajo ningún pretexto. Cualquier PR que las incum
 - `getBotsByUser(userId)` en `db.js` realiza una consulta cross-partition. Para producción a escala,
   recrear el contenedor `bots` con `partitionKey: '/userId'` para mejorar el rendimiento.
 
+### 9. Guard de autenticación y carga inicial (v0.3.0)
+
+- `AuthProvider` expone `isAuthLoading` (boolean). Es `true` mientras se hidrata la sesión desde
+  `localStorage` en el primer montaje del provider.
+- `AppInner` en `App.jsx` **debe** verificar `isAuthLoading` antes de renderizar `Login` o
+  `AppAuthenticated`. Mientras sea `true`, devuelve `null`.
+- **No eliminar ni bypassear este flag.** Sin él, la app salta el Login en visitas recurrentes porque
+  `localStorage` ya tiene sesión guardada, y el primer render ve `isAuthenticated=false` (estado
+  inicial), renderiza Login, y un tick después lo reemplaza por Dashboard sin que el usuario
+  haya ingresado credenciales en esa sesión.
+- Si se migra a Entra ID, este flag debe seguir existiendo o ser reemplazado por el equivalente
+  de MSAL (`inProgress !== InteractionStatus.None`).
+
+### 10. Usuario de prueba admin/admin (v0.3.0)
+
+- Las constantes `TEST_ADMIN_EMAIL` y `TEST_ADMIN_PASSWORD` en `AuthContext.jsx` definen las
+  credenciales de testeo: email `admin`, contraseña `admin`.
+- Este usuario **no requiere Cosmos DB ni variables de entorno**. Su sesión es solo local.
+- `Login.jsx` pasa el campo `password` a `login()`. La validación ocurre en `AuthContext.login()`.
+- **Antes de pasar a producción real:** eliminar o deshabilitar el bloque `TEST_ADMIN` en
+  `AuthContext.jsx`, o protegerlo con una variable de entorno `VITE_ENABLE_TEST_ADMIN=false`.
+
 ---
 
 ## Convenciones de naming
@@ -178,18 +200,35 @@ Ambos servicios son **opcionales en desarrollo local**: si las variables de ento
 
 El sistema de autenticación vive en `src/auth/AuthContext.jsx` y `src/pages/Login.jsx`.
 
-### Flujo de registro (v0.2.0)
+### Flujo de pantalla (v0.3.0)
 
 | Acción | Rol `estudiante` | Rol `docente` |
 |---|---|---|
 | Auto-registro | ✅ Permitido — se guarda en Cosmos DB | ❌ Bloqueado — se muestra `ROLE_RESTRICTION_MSG` |
 | Inicio de sesión | ✅ Permitido | ✅ Permitido (si fue creado por un admin) |
+| Inicio de sesión admin/admin | ✅ Sesión local de testeo, sin BD | ✅ Acceso directo como `docente` |
 
-La implementación actual es un **stub de demostración** enriquecido. En modo demo (sin BD):
+### Por qué la app DEBE mostrar Login primero (bug corregido en v0.3.0)
+
+Sin el flag `isAuthLoading`, el flujo defectuoso era:
+
+1. React monta `AppInner` → `isAuthenticated = false` (estado inicial) → renderiza `<Login />`.
+2. El `useEffect` de `AuthProvider` lee `localStorage` → encuentra sesión guardada → `setUser(...)`.
+3. `isAuthenticated` cambia a `true` → re-renderiza `AppInner` → salta directo a Dashboard.
+
+En Azure Static Web Apps este salto era 100% reproducible en visitas recurrentes.
+
+**Solución:** `isAuthLoading = true` hasta que el `useEffect` complete su bloque `finally`.
+`AppInner` devuelve `null` durante ese tiempo, garantizando que Login/Dashboard se decida con el estado ya resuelto.
+
+### Implementación actual (stub demo enriquecido)
+
+En modo demo (sin BD):
 - El login acepta cualquier correo.
-- El registro de estudiantes persiste en localStorage pero no en BD.
+- El usuario `admin` / `admin` es siempre válido (no requiere BD).
+- El registro de estudiantes persiste en localStorage si no están configuradas las variables de entorno.
 
-**Para producción:** reemplazar por Microsoft Entra ID con `@azure/msal-react`. No modificar la interfaz del contexto (`login`, `register`, `logout`, `user`, `isAuthenticated`) para que el reemplazo sea transparente para el resto de la app.
+**Para producción:** reemplazar por Microsoft Entra ID con `@azure/msal-react`. No modificar la interfaz del contexto (`login`, `register`, `logout`, `user`, `isAuthenticated`, `isAuthLoading`) para que el reemplazo sea transparente.
 
 ---
 
@@ -213,3 +252,5 @@ La implementación actual es un **stub de demostración** enriquecido. En modo d
 - Guardar objetos `File` del navegador en el campo `files` de un bot. Solo metadatos serializables.
 - Crear cuentas de docente mediante el flujo de auto-registro. Solo a través de administración directa en BD.
 - Cambiar el texto del mensaje `ROLE_RESTRICTION_MSG` fuera de `AuthContext.jsx`. Es la única fuente de verdad.
+- **Eliminar o bypassear `isAuthLoading` en `App.jsx`.** Hacerlo reactiva el bug de salto de Login en Azure.
+- **Llamar a `login()` sin pasar el campo `password`.** `Login.jsx` siempre lo incluye en el objeto authData.

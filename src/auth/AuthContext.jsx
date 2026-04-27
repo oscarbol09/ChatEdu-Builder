@@ -1,18 +1,26 @@
 /**
  * @fileoverview Contexto de autenticación de ChatEdu Builder.
  *
- * Expone: { user, isAuthenticated, login, register, logout }
+ * Expone: { user, isAuthenticated, isAuthLoading, login, register, logout }
+ *
+ * CAMBIOS (v0.3.0):
+ * - Se añade `isAuthLoading` (boolean). Mientras es true, AppInner muestra un
+ *   estado de espera en lugar de decidir entre Login y app principal. Esto
+ *   SOLUCIONA el bug donde la app saltaba el Login en Azure porque la sesión
+ *   persistida en localStorage se restauraba sin pasar por el formulario:
+ *   en visitas recurrentes el usuario llegaba directo al Dashboard.
+ * - Se añade usuario de prueba admin / contraseña admin para testeo rápido.
+ *   Funciona sin BD ni variables de entorno.
  *
  * CAMBIOS (v0.2.0):
  * - Se añade la función `register()` para creación de nuevas cuentas.
- * - Rol 'docente' bloqueado en registro automático (solo admin puede crearlo en BD).
+ * - Rol 'docente' bloqueado en registro automático.
  * - `login()` ahora es async y verifica el usuario en Cosmos DB si está disponible.
- *   Si la BD no está disponible, cae a modo demo (solo localStorage).
- * - Se exporta ROLE_RESTRICTION_MSG como constante para usarla en el frontend.
+ * - Se exporta ROLE_RESTRICTION_MSG como constante para Login.jsx.
  *
  * NOTA DE PRODUCCIÓN:
  * Reemplazar por Microsoft Entra ID con @azure/msal-react.
- * La interfaz pública (login, register, logout, user, isAuthenticated)
+ * La interfaz pública (login, register, logout, user, isAuthenticated, isAuthLoading)
  * no debe cambiar para que el reemplazo sea transparente en el resto de la app.
  */
 
@@ -32,6 +40,23 @@ export const ROLE_RESTRICTION_MSG =
   'La creación de cuentas para Docentes/Profesores está restringida. ' +
   'Por favor, comuníquese con el administrador del sistema para solicitar su acceso.';
 
+// ─── Usuario de prueba (testeo) ───────────────────────────────────────────────
+
+/**
+ * Cuenta de administrador para testeo rápido.
+ * Login: email "admin", contraseña "admin".
+ * NO requiere Cosmos DB ni variables de entorno.
+ * ELIMINAR o proteger antes de pasar a producción real con usuarios reales.
+ */
+const TEST_ADMIN_EMAIL    = 'admin';
+const TEST_ADMIN_PASSWORD = 'admin';
+const TEST_ADMIN_PROFILE  = {
+  id:    'admin',
+  email: 'admin',
+  name:  'Administrador',
+  role:  'docente',
+};
+
 // ─── Contexto ─────────────────────────────────────────────────────────────────
 
 const AuthContext = createContext(null);
@@ -39,7 +64,24 @@ const AuthContext = createContext(null);
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user,          setUser]          = useState(null);
+
+  /**
+   * isAuthLoading: true mientras se lee localStorage en el primer montaje.
+   *
+   * POR QUÉ ES NECESARIO:
+   * Sin este flag, AppInner evalúa isAuthenticated en el primer render
+   * (cuando user === null) y concluye que el usuario NO está autenticado,
+   * mostrando Login. Un tick después, el useEffect hidrata user desde
+   * localStorage y isAuthenticated cambia a true, causando un salto
+   * inmediato al Dashboard sin que el usuario haya introducido credenciales.
+   * En Azure Static Web Apps este comportamiento era consistente porque el
+   * localStorage persiste entre sesiones del navegador.
+   *
+   * Con isAuthLoading=true durante la hidratación, AppInner espera antes
+   * de renderizar Login o Dashboard, eliminando el salto.
+   */
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   /** Carga la sesión persistida en localStorage al montar. */
   useEffect(() => {
@@ -48,6 +90,9 @@ export const AuthProvider = ({ children }) => {
       if (raw) setUser(JSON.parse(raw));
     } catch {
       localStorage.removeItem('chatedu_user');
+    } finally {
+      // Marcar como resuelto SIEMPRE, haya o no sesión guardada.
+      setIsAuthLoading(false);
     }
   }, []);
 
@@ -60,21 +105,31 @@ export const AuthProvider = ({ children }) => {
   // ─── login ──────────────────────────────────────────────────────────────────
 
   /**
-   * Inicia sesión con email y rol.
-   * - Si Cosmos DB está disponible: verifica que el usuario exista en la BD
-   *   y carga su perfil real (nombre, rol guardado).
-   * - Si la BD no está disponible (demo local): crea una sesión solo en localStorage.
+   * Inicia sesión con email (y contraseña opcional para el usuario de prueba).
    *
-   * @param {{ email: string, role: string }} authData
+   * Orden de resolución:
+   *   1. Si email === "admin" y password === "admin" → sesión de testeo local.
+   *   2. Si Cosmos DB está disponible → verifica que el usuario exista en BD.
+   *   3. Fallback demo: cualquier correo es válido (solo localStorage).
+   *
+   * @param {{ email: string, role: string, password?: string }} authData
    */
   const login = async (authData) => {
     if (!authData.email) throw new Error('Ingrese un correo electrónico.');
 
-    // Intentar cargar el perfil real desde la BD.
+    // ── 1. Usuario de prueba admin/admin ─────────────────────────────────────
+    if (
+      authData.email.trim().toLowerCase() === TEST_ADMIN_EMAIL &&
+      authData.password === TEST_ADMIN_PASSWORD
+    ) {
+      _persistUser(TEST_ADMIN_PROFILE);
+      return;
+    }
+
+    // ── 2. Verificar en Cosmos DB ─────────────────────────────────────────────
     const dbUser = await getUserByEmail(authData.email);
 
     if (dbUser) {
-      // Perfil encontrado: usar los datos guardados (incluye el rol real).
       _persistUser({
         email: dbUser.email,
         role:  dbUser.role,
@@ -82,7 +137,7 @@ export const AuthProvider = ({ children }) => {
         id:    dbUser.id,
       });
     } else {
-      // BD no disponible o usuario no registrado: modo demo (cualquier correo es válido).
+      // ── 3. Modo demo ──────────────────────────────────────────────────────
       const demoUser = {
         email: authData.email,
         role:  authData.role,
@@ -98,10 +153,6 @@ export const AuthProvider = ({ children }) => {
    * Registra un nuevo usuario.
    *
    * REGLA: Si el rol es 'docente' o 'profesor', lanza un error con ROLE_RESTRICTION_MSG.
-   * El frontend debe mostrar ese mensaje de manera destacada (ver Login.jsx).
-   *
-   * Si Cosmos DB no está disponible, el registro igual avanza en modo demo local,
-   * pero el usuario no quedará persitido en la BD hasta que la conexión se restaure.
    *
    * @param {{ email: string, role: string, name?: string }} regData
    * @throws {Error} Si el rol está restringido o si el correo ya está registrado.
@@ -109,21 +160,17 @@ export const AuthProvider = ({ children }) => {
   const register = async (regData) => {
     const role = regData.role?.toLowerCase() ?? '';
 
-    // ── Validación de rol ────────────────────────────────────────────────────
     if (RESTRICTED_ROLES.has(role)) {
       throw new Error(ROLE_RESTRICTION_MSG);
     }
 
     if (!regData.email) throw new Error('Ingrese un correo electrónico.');
 
-    // ── Verificar duplicado en BD ────────────────────────────────────────────
     const existing = await getUserByEmail(regData.email);
     if (existing) {
       throw new Error('Ya existe una cuenta con este correo electrónico.');
     }
 
-    // ── Crear documento de usuario ───────────────────────────────────────────
-    // id === email → lookup O(1) por partition key en Cosmos DB.
     const newUser = {
       id:        regData.email,
       email:     regData.email,
@@ -136,7 +183,6 @@ export const AuthProvider = ({ children }) => {
       await createUser(newUser);
       console.log('✅ Usuario registrado en BD:', newUser.email);
     } catch (dbError) {
-      // Si la BD falla (ej: variables no configuradas), continuar en modo demo.
       console.warn('⚠️ No se pudo guardar el usuario en BD (modo demo):', dbError.message);
     }
 
@@ -155,6 +201,7 @@ export const AuthProvider = ({ children }) => {
   const value = {
     user,
     isAuthenticated: !!user,
+    isAuthLoading,
     login,
     register,
     logout,

@@ -9,6 +9,13 @@
  *   - AppAuthenticated: se monta solo cuando el usuario ya está autenticado.
  *     Aquí viven todos los hooks de estado de la app (useBots, useState de vistas).
  *   - AppInner: decide si mostrar Login o AppAuthenticated.
+ *
+ * CAMBIOS (v0.3.0):
+ * - AppInner consume `isAuthLoading` desde AuthContext.
+ *   Mientras la hidratación de localStorage no haya terminado, se muestra
+ *   null en lugar de Login o Dashboard. Esto elimina el bug donde la app
+ *   mostraba el Dashboard directamente en visitas recurrentes en Azure,
+ *   saltándose el Login, porque localStorage ya tenía sesión guardada.
  */
 
 import { useState } from 'react';
@@ -101,11 +108,23 @@ function AppAuthenticated() {
 
 /**
  * Enrutador de autenticación.
- * Decide si mostrar Login o la app principal.
- * No contiene hooks de estado propios para mantener la lógica mínima.
+ * Decide si mostrar un loader, Login o la app principal.
+ *
+ * IMPORTANTE — por qué existe el check de isAuthLoading:
+ * AuthContext hidrata `user` desde localStorage en un useEffect (asíncrono).
+ * Si AppInner renderizara inmediatamente, vería isAuthenticated=false en el
+ * primer tick y mostraría Login. Un tick después isAuthenticated cambiaría a
+ * true y la app saltaría al Dashboard sin que el usuario se autenticara.
+ * Esperando a isAuthLoading=false garantizamos que la decisión se tome con
+ * el estado de autenticación ya resuelto.
  */
 function AppInner() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isAuthLoading } = useAuth();
+
+  // Esperar a que la sesión de localStorage termine de hidratarse.
+  // Sin este guard, la app saltaba el Login en visitas recurrentes en Azure.
+  if (isAuthLoading) return null;
+
   return isAuthenticated ? <AppAuthenticated /> : <Login />;
 }
 

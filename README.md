@@ -225,9 +225,31 @@ chatedu-builder/
 
 ## Autenticación y roles
 
-### Flujo de pantalla (v0.2.0)
+### Guard de autenticación — por qué siempre inicia en Login (v0.3.0)
 
-La pantalla `/login` ofrece dos modos mediante tabs:
+La app **siempre debe mostrar el Login al acceder**, incluso si el navegador tiene una sesión anterior guardada. Esto se garantiza con el flag `isAuthLoading` en `AuthContext`:
+
+- Al montar la app, `isAuthLoading = true`.
+- `AppInner` en `App.jsx` devuelve `null` mientras `isAuthLoading` es `true`.
+- El `useEffect` que lee `localStorage` pone `isAuthLoading = false` en su bloque `finally`.
+- Solo entonces `AppInner` decide si mostrar `<Login />` o `<AppAuthenticated />`.
+
+**Bug que esto corrige:** sin este flag, en visitas recurrentes desde Azure el localStorage ya contenía una sesión guardada. El primer render veía `isAuthenticated=false` y mostraba Login, pero un tick después se hidrataba el usuario y la app saltaba directamente al Dashboard sin que el usuario hubiera introducido credenciales en esa sesión.
+
+### Usuario de prueba para testeo
+
+| Campo | Valor |
+|---|---|
+| Email / usuario | `admin` |
+| Contraseña | `admin` |
+| Rol | `docente` |
+| Requiere BD | No |
+
+Este usuario está definido en `AuthContext.jsx` como `TEST_ADMIN_*`. Funciona sin Cosmos DB ni variables de entorno. Útil para probar el flujo completo en Azure desde el primer día.
+
+> **Antes de producción real:** eliminar las constantes `TEST_ADMIN_*` en `AuthContext.jsx`.
+
+### Flujo de pantalla (v0.3.0)
 
 | Tab | Descripción |
 |---|---|
@@ -270,7 +292,7 @@ Reemplazar por **Microsoft Entra ID (Azure AD)** usando la librería oficial:
 npm install @azure/msal-browser @azure/msal-react
 ```
 
-La interfaz del contexto (`login`, `register`, `logout`, `user`, `isAuthenticated`) no debe cambiar al hacer el reemplazo.
+La interfaz del contexto (`login`, `register`, `logout`, `user`, `isAuthenticated`, `isAuthLoading`) no debe cambiar al hacer el reemplazo.
 
 ---
 
@@ -373,3 +395,4 @@ Para eliminar por completo las credenciales del cliente, la arquitectura recomen
 - Los documentos en Blob Storage son **privados por defecto** (sin `publicAccessLevel`). El acceso debe gestionarse con SAS tokens de corta duración generados en el servidor.
 - Implementar rate limiting en el proxy de Azure Functions para evitar abuso de la API de IA.
 - La validación de roles en el registro ocurre en `AuthContext.jsx`. En producción con Entra ID, esta validación debe también ocurrir en el backend (Azure Functions) antes de asignar permisos.
+- **El usuario de prueba `admin/admin` debe eliminarse antes de desplegar en un entorno con usuarios reales.** Ver constantes `TEST_ADMIN_*` en `AuthContext.jsx`.
