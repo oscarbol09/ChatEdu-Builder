@@ -22,6 +22,10 @@
  * ▸ Cambiar el modelo de IA:
  *     Modificar GEMINI_MODEL (solo aquí, nunca en otro archivo).
  *
+ * ▸ Cambiar la URL base del sitio desplegado:
+ *     Modificar VITE_APP_URL en el archivo .env.
+ *     Si no está definida, la app usa window.location.origin automáticamente.
+ *
  * ▸ Cambiar el valor por defecto del formulario:
  *     Modificar DEFAULT_BOT_CONFIG.
  * ════════════════════════════════════════════════════════════════
@@ -35,6 +39,23 @@
  * @see https://ai.google.dev/gemini-api/docs/models
  */
 export const GEMINI_MODEL = 'gemini-2.5-flash';
+
+// ─── URL base de la aplicación ────────────────────────────────────────────────
+/**
+ * URL base usada para construir los enlaces de despliegue de los chatbots.
+ *
+ * Estrategia de resolución (en orden de prioridad):
+ *   1. VITE_APP_URL definida en .env  → usa ese valor (recomendado en producción)
+ *   2. Sin VITE_APP_URL               → usa window.location.origin en runtime
+ *      (funciona automáticamente en cualquier dominio de Azure Static Web Apps)
+ *
+ * Ejemplos:
+ *   - Producción Azure:  https://blue-moss-07818a11e7.azurestaticapps.net
+ *   - Dominio propio:    https://chatedu.tuuniversidad.edu.co
+ *   - Desarrollo local:  http://localhost:5173  (resuelto por window.location.origin)
+ */
+export const APP_BASE_URL = import.meta.env.VITE_APP_URL || null;
+// null → DeployPanel resuelve la URL en runtime con window.location.origin
 
 // ─── Paleta de colores ────────────────────────────────────────────────────────
 export const COLORS = {

@@ -3,7 +3,7 @@
  * Recibe initialBot para modo edición (desde "Configurar") o null para creación nueva.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import styles from './Builder.module.css';
 import StepBar from '../ui/StepBar.jsx';
 import UploadZone from './UploadZone.jsx';
@@ -15,13 +15,21 @@ import { DEFAULT_BOT_CONFIG } from '../../constants/index.js';
 /**
  * @param {Object} props
  * @param {Object|null} props.initialBot - Bot existente para editar, o null para crear nuevo.
- * @param {(config: Object, files: Array) => void} props.onFinish - Callback al crear nuevo.
- * @param {(botId: number, config: Object, files: Array) => void} props.onUpdate - Callback al actualizar.
+ * @param {(config: Object, files: Array) => void} props.onFinish   - Callback al crear nuevo.
+ * @param {(botId: string, config: Object, files: Array) => void} props.onUpdate - Callback al actualizar.
  * @param {() => void} props.onCancel
  */
 export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
   const [step, setStep] = useState(0);
   const [files, setFiles] = useState([]);
+
+  /**
+   * ID temporal generado cuando se crea un bot nuevo y aún no tiene ID de Cosmos DB.
+   * Se usa en DeployPanel para construir la URL antes de que el bot sea guardado.
+   * En modo edición, usamos el ID real del bot existente.
+   */
+  const [tempBotId] = useState(() => Date.now().toString());
+  const activeBotId = initialBot?.id ?? tempBotId;
 
   /** Si viene en modo edición, precargar los campos del bot existente. */
   const [config, setConfig] = useState(() => {
@@ -42,14 +50,14 @@ export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
 
   /** Carga los archivos del bot existente al editar. */
   useEffect(() => {
-    if (initialBot && initialBot.files) {
+    if (initialBot?.files) {
       setFiles(initialBot.files);
     } else if (!initialBot) {
       setFiles([]);
     }
   }, [initialBot]);
 
-  /** Actualiza el formulario cuando cambia el bot a editar (after mount). */
+  /** Sincroniza el formulario cuando cambia el bot a editar (navegación entre bots). */
   useEffect(() => {
     if (initialBot) {
       setConfig({
@@ -141,7 +149,8 @@ export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
             <p className={styles.stepDesc}>
               Obtén el enlace o el código de incrustación para integrarlo en tu LMS o sitio web.
             </p>
-            <DeployPanel config={config} />
+            {/* botId pasa el ID real (edición) o el ID temporal (bot nuevo) */}
+            <DeployPanel config={config} botId={activeBotId} />
           </>
         )}
       </div>

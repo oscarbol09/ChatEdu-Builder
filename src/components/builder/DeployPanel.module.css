@@ -29,6 +29,36 @@
   color: var(--color-teal-700);
 }
 
+/* ── Aviso de modo desarrollo (localhost) ── */
+.localWarning {
+  padding: 12px 16px;
+  background: #fffbeb;
+  border: 0.5px solid #d97706;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #7a4200;
+  line-height: 1.6;
+}
+
+.localWarning code {
+  font-family: 'Fira Mono', 'Consolas', monospace;
+  background: #fef3c7;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ── Nota informativa del dominio detectado ── */
+.baseUrlNote {
+  margin: -8px 0 0;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.baseUrlNote code {
+  font-family: 'Fira Mono', 'Consolas', monospace;
+  color: var(--color-text-primary);
+}
+
 /* ── Campos de copia ── */
 .field {
   display: flex;
@@ -52,6 +82,7 @@
 
 .codeInput {
   flex: 1;
+  min-width: 0; /* evita que el input desborde el flex container */
   padding: 9px 12px;
   border: 0.5px solid var(--color-border-secondary);
   border-radius: 8px;
@@ -59,6 +90,9 @@
   font-size: 12px;
   background: var(--color-background-secondary);
   color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .copyBtn {
