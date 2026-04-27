@@ -1,23 +1,32 @@
 /**
  * @fileoverview Componente raíz de la aplicación.
  * Responsabilidad única: enrutamiento de vistas.
+ *
+ * REGLA DE HOOKS (React):
+ * Todos los hooks deben llamarse en el nivel superior del componente,
+ * ANTES de cualquier retorno condicional. Se separó AppInner en dos
+ * componentes para cumplir esta regla correctamente:
+ *   - AppAuthenticated: se monta solo cuando el usuario ya está autenticado.
+ *     Aquí viven todos los hooks de estado de la app (useBots, useState de vistas).
+ *   - AppInner: decide si mostrar Login o AppAuthenticated.
  */
 
+import { useState } from 'react';
 import styles from './App.module.css';
 import { useBots } from './hooks/useBots.js';
 import Sidebar from './components/layout/Sidebar.jsx';
 import Dashboard from './components/dashboard/Dashboard.jsx';
 import Builder from './components/builder/Builder.jsx';
 import Analytics from './components/analytics/Analytics.jsx';
-import { useState } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthContext.jsx';
 import Login from './pages/Login.jsx';
 
-function AppInner() {
-  const { isAuthenticated } = useAuth();
-  if (!isAuthenticated) {
-    return <Login />;
-  }
+/**
+ * Shell principal de la aplicación.
+ * Solo se monta cuando el usuario está autenticado, por lo que
+ * todos los hooks de estado pueden llamarse incondicionalmente.
+ */
+function AppAuthenticated() {
   const [view, setView] = useState('dashboard');
   const { bots, selectedBot, setSelectedBot, addBot, updateBot } = useBots();
 
@@ -89,7 +98,17 @@ function AppInner() {
     </div>
   );
 }
- 
+
+/**
+ * Enrutador de autenticación.
+ * Decide si mostrar Login o la app principal.
+ * No contiene hooks de estado propios para mantener la lógica mínima.
+ */
+function AppInner() {
+  const { isAuthenticated } = useAuth();
+  return isAuthenticated ? <AppAuthenticated /> : <Login />;
+}
+
 export default function App() {
   return (
     <AuthProvider>

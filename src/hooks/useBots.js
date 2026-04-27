@@ -1,45 +1,53 @@
 /**
  * @fileoverview Hook de estado para gestión de chatbots.
- * Usa Cosmos DB si está disponible, si no usa datos locales.
+ *
+ * Usa Cosmos DB si está disponible; si no, cae a datos mock locales.
+ *
+ * CORRECCIÓN (v0.1.1):
+ * La variable `dbInitialized` era un flag a nivel de módulo compartido entre
+ * instancias. Se reemplazó por un useRef interno para que el ciclo de vida
+ * de la inicialización quede ligado al ciclo de vida del componente.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { MOCK_BOTS } from '../data/mockData.js';
 import { COLORS } from '../constants/index.js';
-import { getBots as getBotsDB, createBot as createBotDB, updateBot as updateBotDB, initDB } from '../services/db.js';
-
-let dbInitialized = false;
+import {
+  getBots as getBotsDB,
+  createBot as createBotDB,
+  updateBot as updateBotDB,
+  initDB,
+} from '../services/db.js';
 
 export function useBots() {
   const [bots, setBots] = useState([]);
   const [selectedBot, setSelectedBot] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  /** Ref en lugar de variable de módulo: el flag queda ligado a esta instancia del hook. */
+  const dbInitialized = useRef(false);
+
   useEffect(() => {
     async function loadBots() {
-      console.log('🔄 Iniciando base de datos...');
-      if (!dbInitialized) {
+      if (!dbInitialized.current) {
         try {
           await initDB();
-          dbInitialized = true;
+          dbInitialized.current = true;
           console.log('✅ DB inicializada');
         } catch (e) {
-          console.warn('⚠️ Cosmos DB no disponible:', e.message);
+          console.warn('⚠️ Cosmos DB no disponible, usando datos locales:', e.message);
         }
       }
 
       try {
-        console.log('🔄 Obteniendo bots de Cosmos DB...');
         const remoteBots = await getBotsDB();
-        console.log('📥 Bots obtenidos:', remoteBots);
         if (remoteBots && remoteBots.length > 0) {
           setBots(remoteBots);
         } else {
-          console.log('📦 No hay bots remotos, usando MOCK_BOTS');
           setBots(MOCK_BOTS);
         }
       } catch (e) {
-        console.warn('⚠️ Error cargando bots:', e.message);
+        console.warn('⚠️ Error cargando bots, usando datos locales:', e.message);
         setBots(MOCK_BOTS);
       } finally {
         setIsLoading(false);
@@ -67,7 +75,7 @@ export function useBots() {
       updatedAt: new Date().toISOString(),
     };
 
-    if (dbInitialized) {
+    if (dbInitialized.current) {
       try {
         await createBotDB(newBot);
       } catch (e) {
@@ -86,7 +94,7 @@ export function useBots() {
       updatedAt: new Date().toISOString(),
     };
 
-    if (dbInitialized) {
+    if (dbInitialized.current) {
       try {
         await updateBotDB(botId, updatedData);
       } catch (e) {
@@ -94,12 +102,9 @@ export function useBots() {
       }
     }
 
-    setBots((prev) => prev.map((bot) => {
-      if (bot.id === botId) {
-        return { ...bot, ...updatedData };
-      }
-      return bot;
-    }));
+    setBots((prev) =>
+      prev.map((bot) => (bot.id === botId ? { ...bot, ...updatedData } : bot))
+    );
   }, []);
 
   const refreshBots = useCallback(async () => {
@@ -110,19 +115,19 @@ export function useBots() {
         setBots(remoteBots);
       }
     } catch (e) {
-      console.warn('⚠️ Error refresh:', e.message);
+      console.warn('⚠️ Error al refrescar bots:', e.message);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  return { 
-    bots, 
-    selectedBot, 
-    setSelectedBot, 
-    addBot, 
+  return {
+    bots,
+    selectedBot,
+    setSelectedBot,
+    addBot,
     updateBot,
     refreshBots,
-    isLoading 
+    isLoading,
   };
 }

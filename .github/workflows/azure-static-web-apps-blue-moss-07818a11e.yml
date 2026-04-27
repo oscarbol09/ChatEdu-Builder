@@ -19,19 +19,26 @@ jobs:
         with:
           submodules: true
           lfs: false
+
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
+        # Las variables VITE_* se inyectan en el build como variables de entorno.
+        # Agregar los valores reales como Secrets en:
+        # GitHub → tu repo → Settings → Secrets and variables → Actions
+        # ⚠️  NUNCA hardcodear valores reales aquí.
+        env:
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+          VITE_COSMOS_ENDPOINT: ${{ secrets.VITE_COSMOS_ENDPOINT }}
+          VITE_COSMOS_KEY: ${{ secrets.VITE_COSMOS_KEY }}
+          VITE_STORAGE_CONNECTION_STRING: ${{ secrets.VITE_STORAGE_CONNECTION_STRING }}
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_BLUE_MOSS_07818A11E }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for Github integrations (i.e. PR comments)
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
-          ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
-          # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
-          app_location: "/" # App source code path
-          api_location: "" # Api source code path - optional
-          output_location: "build" # Built app content directory - optional
-          ###### End of Repository/Build Configurations ######
+          app_location: "/"        # Raíz del código fuente React
+          api_location: ""         # Sin Azure Functions por ahora (a implementar)
+          output_location: "build" # Debe coincidir con vite.config.js → build.outDir
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'

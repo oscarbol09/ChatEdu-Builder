@@ -4,6 +4,7 @@ node_modules/
 # Build
 dist/
 dist-ssr/
+build/
 
 # Variables de entorno — NUNCA subir al repositorio
 .env
