@@ -14,7 +14,8 @@ Plataforma no-code para crear, configurar y desplegar chatbots educativos contex
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Stack tecnológico](#stack-tecnológico)
 - [Funcionalidades](#funcionalidades)
-- [Autenticación](#autenticación)
+- [Autenticación y roles](#autenticación-y-roles)
+- [Persistencia de bots](#persistencia-de-bots)
 - [Despliegue en producción — Azure](#despliegue-en-producción--azure)
 - [Consideraciones de seguridad](#consideraciones-de-seguridad)
 
@@ -29,7 +30,7 @@ ChatEdu Builder es una Single Page Application (SPA) construida con React + Vite
 3. **Vista previa en vivo** — Interactúa con el bot antes de publicarlo. Las respuestas son generadas en tiempo real por `gemini-2.5-flash`.
 4. **Despliegue** — Obtiene la URL directa y el código de iframe para integrar en cualquier LMS.
 
-El panel principal (Dashboard) permite visualizar, gestionar y consultar analíticas de todos los bots creados. Los bots se persisten en Azure Cosmos DB.
+El panel principal (Dashboard) permite visualizar, gestionar y consultar analíticas de todos los bots creados. Los bots se persisten en Azure Cosmos DB asociados al usuario propietario.
 
 ---
 
@@ -81,8 +82,8 @@ VITE_COSMOS_KEY=TU_CLAVE_PRIMARIA
 VITE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=TU_CUENTA;AccountKey=TU_CLAVE;EndpointSuffix=core.windows.net
 ```
 
-> **Importante:** El archivo `.env` está incluido en `.gitignore`. Nunca lo subas a un repositorio.
-> Las variables `VITE_*` son visibles en el bundle del cliente — úsalas SOLO en desarrollo local.
+> **Importante:** El archivo `.env` está incluido en `.gitignore`. Nunca lo subas a un repositorio.  
+> Las variables `VITE_*` son visibles en el bundle del cliente — úsalas SOLO en desarrollo local.  
 > En producción, estas credenciales deben vivir en Azure Functions + Key Vault (ver sección de despliegue).
 
 ---
@@ -127,6 +128,7 @@ chatedu-builder/
 ├── package.json                      # Dependencias y scripts
 ├── .env.example                      # Plantilla de variables de entorno
 ├── .gitignore
+├── AGENT.md                          # Instrucciones para agentes de IA
 ├── .github/
 │   └── workflows/
 │       └── azure-static-web-apps-*.yml  # CI/CD → Azure Static Web Apps
@@ -137,10 +139,10 @@ chatedu-builder/
     ├── App.module.css
     │
     ├── auth/
-    │   └── AuthContext.jsx           # Contexto de autenticación (demo → Entra ID en prod.)
+    │   └── AuthContext.jsx           # Contexto de autenticación: login, register, logout
     │
     ├── pages/
-    │   ├── Login.jsx                 # Pantalla de inicio de sesión
+    │   ├── Login.jsx                 # Pantalla con modos Iniciar sesión / Crear cuenta
     │   └── Login.module.css
     │
     ├── styles/
@@ -154,7 +156,7 @@ chatedu-builder/
     │
     ├── services/
     │   ├── geminiApi.js              # Llamadas a Google Gemini API
-    │   ├── db.js                     # Acceso a Azure Cosmos DB
+    │   ├── db.js                     # Acceso a Azure Cosmos DB (bots + usuarios)
     │   ├── storage.js                # Acceso a Azure Blob Storage
     │   └── claudeApi.legacy.js       # [Legacy] Implementación anterior para Anthropic Claude
     │
@@ -194,7 +196,7 @@ chatedu-builder/
 | Vite | 5.4.x | Build tool y dev server |
 | CSS Modules | — | Estilos encapsulados por componente |
 | Google Gemini API | REST | Inferencia de lenguaje (`gemini-2.5-flash`) |
-| Azure Cosmos DB | SDK v4 | Persistencia de bots |
+| Azure Cosmos DB | SDK v4 | Persistencia de bots y usuarios |
 | Azure Blob Storage | SDK v12 | Almacenamiento de documentos |
 | Azure Static Web Apps | — | Hosting del frontend |
 | Google Fonts | CDN | Tipografías: Syne + DM Sans |
@@ -204,7 +206,7 @@ chatedu-builder/
 ## Funcionalidades
 
 ### Dashboard
-- Listado de chatbots con métricas resumidas (documentos, consultas, fecha de creación).
+- Listado de chatbots **del usuario autenticado** con métricas resumidas (documentos, consultas, fecha de creación).
 - Indicador de estado activo/inactivo por bot.
 - Acceso directo a analítica o configuración.
 
@@ -221,19 +223,97 @@ chatedu-builder/
 
 ---
 
-## Autenticación
+## Autenticación y roles
 
-En la versión actual (0.1.x), la autenticación es **simulada** para fines de demostración: acepta cualquier dirección de correo electrónico sin contraseña.
+### Flujo de pantalla (v0.2.0)
 
-El sistema está implementado en `src/auth/AuthContext.jsx` y `src/pages/Login.jsx`. El estado del usuario se persiste en `localStorage` durante la sesión.
+La pantalla `/login` ofrece dos modos mediante tabs:
 
-**Para producción:** reemplazar por **Microsoft Entra ID (Azure AD)** usando la librería oficial:
+| Tab | Descripción |
+|---|---|
+| **Iniciar sesión** | Verifica el usuario en Cosmos DB. Si no existe, crea una sesión demo en localStorage. |
+| **Crear cuenta** | Registra un nuevo usuario en Cosmos DB. Solo disponible para el rol Estudiante. |
+
+### Reglas de rol
+
+| Rol | Auto-registro | Notas |
+|---|---|---|
+| `estudiante` | ✅ Permitido | Se persiste en el contenedor `users` de Cosmos DB. |
+| `docente` | ❌ Bloqueado | Muestra el aviso de restricción. Solo un administrador puede crear esta cuenta en BD. |
+
+**Aviso de restricción (texto canónico):**
+> "La creación de cuentas para Docentes/Profesores está restringida. Por favor, comuníquese con el administrador del sistema para solicitar su acceso."
+
+La validación ocurre en dos capas:
+1. **Frontend:** el botón "Crear cuenta" se deshabilita y se muestra el aviso cuando el rol seleccionado es Docente/Profesor.
+2. **AuthContext:** `register()` lanza un error si el rol pertenece al conjunto `RESTRICTED_ROLES`, como segunda línea de defensa.
+
+### Esquema del documento de usuario en Cosmos DB
+
+```json
+{
+  "id":        "usuario@ejemplo.com",
+  "email":     "usuario@ejemplo.com",
+  "name":      "Nombre del usuario",
+  "role":      "estudiante",
+  "createdAt": "2025-04-26T18:00:00.000Z"
+}
+```
+
+> El campo `id` es igual al email, lo que permite búsquedas O(1) por partition key sin consultas cross-partition.
+
+### Para producción
+
+Reemplazar por **Microsoft Entra ID (Azure AD)** usando la librería oficial:
 
 ```bash
 npm install @azure/msal-browser @azure/msal-react
 ```
 
-Azure Static Web Apps también ofrece autenticación integrada con Microsoft, GitHub y Google sin código adicional, activable desde el portal de Azure.
+La interfaz del contexto (`login`, `register`, `logout`, `user`, `isAuthenticated`) no debe cambiar al hacer el reemplazo.
+
+---
+
+## Persistencia de bots
+
+### Cómo funciona (v0.2.0)
+
+1. Al iniciar sesión, `useBots.js` llama a `initDB()` para verificar/crear los contenedores.
+2. Se consulta `getBotsByUser(user.email)` que filtra los bots por el campo `userId`.
+3. Si la BD no está disponible, el hook cae a los datos de demo (`MOCK_BOTS`).
+4. Al crear o editar un bot, el documento se guarda en Cosmos DB y se actualiza el estado local.
+
+### Esquema del documento de bot en Cosmos DB
+
+```json
+{
+  "id":          "1714156800000",
+  "userId":      "docente@universidad.edu.co",
+  "name":        "Tutor de Economía Circular",
+  "subject":     "Economía Circular",
+  "level":       "Universitario",
+  "tone":        "Amigable y cercano",
+  "welcome":     "¡Hola! Soy tu asistente de Economía Circular.",
+  "restriction": "guided",
+  "docs":        3,
+  "files": [
+    { "id": 1714156800001, "name": "guia_curso.pdf", "size": "1.2 MB", "status": "ready" }
+  ],
+  "queries":   0,
+  "active":    true,
+  "color":     "#3D44A8",
+  "createdAt": "2025-04-26T18:00:00.000Z",
+  "updatedAt": "2025-04-26T18:00:00.000Z"
+}
+```
+
+> **Nota arquitectural:** el contenedor `bots` usa `partitionKey: '/id'`. Las consultas por `userId` son cross-partition. Para producción a gran escala, recrear el contenedor con `partitionKey: '/userId'`.
+
+### Disponibilidad tras recargar la página
+
+- Los bots creados se cargan desde Cosmos DB en cada montaje del hook.
+- Si el usuario no tiene bots en BD, el dashboard muestra una lista vacía (correcto para usuarios nuevos).
+- Los datos de demo (`MOCK_BOTS`) solo aparecen si la BD no está disponible.
 
 ---
 
@@ -247,6 +327,13 @@ Cada push a `main` dispara el workflow `.github/workflows/azure-static-web-apps-
 1. Hace checkout del código.
 2. Ejecuta `vite build` (output en `build/`).
 3. Sube el resultado a Azure Static Web Apps.
+
+> **Importante sobre variables de entorno:** Vite incrusta las variables `VITE_*` en el bundle **durante el build**. Si agregas o modificas variables en el portal de Azure **después** de un deploy, el cambio no tendrá efecto hasta que el workflow vuelva a ejecutarse. Para forzar un re-deploy sin cambios de código:
+>
+> ```bash
+> git commit --allow-empty -m "chore: trigger redeploy"
+> git push
+> ```
 
 ### Variables de entorno en producción
 
@@ -285,3 +372,4 @@ Para eliminar por completo las credenciales del cliente, la arquitectura recomen
 - En producción, toda la lógica de Cosmos DB, Blob Storage y llamadas a la API de IA debe vivir en Azure Functions con Managed Identity.
 - Los documentos en Blob Storage son **privados por defecto** (sin `publicAccessLevel`). El acceso debe gestionarse con SAS tokens de corta duración generados en el servidor.
 - Implementar rate limiting en el proxy de Azure Functions para evitar abuso de la API de IA.
+- La validación de roles en el registro ocurre en `AuthContext.jsx`. En producción con Entra ID, esta validación debe también ocurrir en el backend (Azure Functions) antes de asignar permisos.

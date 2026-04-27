@@ -41,7 +41,7 @@ Estas reglas no deben violarse bajo ningún pretexto. Cualquier PR que las incum
 
 - **Ningún componente puede llamar a `fetch()` directamente.** Toda comunicación con APIs externas pasa por `src/services/`.
 - La función `sendChatMessage` en `src/services/geminiApi.js` es el único punto de acceso a la API de Gemini.
-- Las funciones en `src/services/db.js` son el único punto de acceso a Azure Cosmos DB.
+- Las funciones en `src/services/db.js` son el único punto de acceso a Azure Cosmos DB (bots y usuarios).
 - Las funciones en `src/services/storage.js` son el único punto de acceso a Azure Blob Storage.
 - Las API keys y credenciales se leen **únicamente** desde `import.meta.env.*`. No deben pasarse como props ni almacenarse en estado.
 
@@ -63,6 +63,25 @@ Estas reglas no deben violarse bajo ningún pretexto. Cualquier PR que las incum
 - Las variables `VITE_*` son visibles en el bundle del cliente. Nunca poner en ellas secretos que no deban ser accesibles por el usuario final en producción.
 - En producción, la lógica de Cosmos DB, Blob Storage y la API de IA deben ejecutarse en Azure Functions con Managed Identity, no en el cliente.
 - Los contenedores de Azure Blob Storage deben crearse siempre sin `publicAccessLevel` (privados por defecto).
+
+### 7. Roles y usuarios (v0.2.0)
+
+- **La creación de cuentas con rol `docente` o `profesor` está bloqueada en el flujo de auto-registro.**
+  Solo un administrador puede crear cuentas de docente directamente en Azure Cosmos DB (contenedor `users`).
+- La constante `ROLE_RESTRICTION_MSG` en `src/auth/AuthContext.jsx` es el único texto canónico del aviso.
+  El frontend (`Login.jsx`) lo importa y muestra; no debe redactarse en ningún otro lugar.
+- Si se añaden nuevos roles restringidos, agregarlos al `Set` `RESTRICTED_ROLES` en `AuthContext.jsx`.
+- `login()` en `AuthContext` es **async**; los componentes que lo llamen deben usar `await` dentro de un `onSubmit` o `onClick` async.
+
+### 8. Persistencia de bots (v0.2.0)
+
+- Cada documento bot en Cosmos DB **debe incluir el campo `userId`** (email del propietario).
+  Sin este campo el bot quedará huérfano y no aparecerá en el dashboard del usuario.
+- El campo `files` en un bot contiene únicamente **metadatos serializables**:
+  `{ id: number, name: string, size: string, status: string }`.
+  Nunca guardar objetos `File` del navegador en el documento de Cosmos DB.
+- `getBotsByUser(userId)` en `db.js` realiza una consulta cross-partition. Para producción a escala,
+  recrear el contenedor `bots` con `partitionKey: '/userId'` para mejorar el rendimiento.
 
 ---
 
@@ -114,10 +133,44 @@ Si se actualiza el modelo:
 
 | Servicio | Archivo | Descripción |
 |---|---|---|
-| Azure Cosmos DB | `src/services/db.js` | Persiste los bots del usuario. Base de datos: `chatedu`, contenedor: `bots`. |
+| Azure Cosmos DB | `src/services/db.js` | Persiste los **bots** (contenedor `bots`) y los **usuarios** (contenedor `users`). Base de datos: `chatedu`. |
 | Azure Blob Storage | `src/services/storage.js` | Almacena los documentos subidos por el docente. Contenedor: `documents` (privado). |
 
 Ambos servicios son **opcionales en desarrollo local**: si las variables de entorno no están definidas, la app inicializa con datos mock y simula las operaciones de escritura.
+
+### Esquema del contenedor `users`
+
+```
+{
+  id:        string   // === email (partition key) → lookup O(1) por email
+  email:     string
+  name:      string
+  role:      'estudiante' | 'docente'
+  createdAt: string   // ISO 8601
+}
+```
+
+### Esquema del contenedor `bots`
+
+```
+{
+  id:          string   // timestamp (partition key)
+  userId:      string   // email del propietario — OBLIGATORIO para getBotsByUser()
+  name:        string
+  subject:     string
+  level:       string
+  tone:        string
+  welcome:     string
+  restriction: 'strict' | 'guided' | 'open'
+  docs:        number   // = files.length
+  files:       Array<{ id: number, name: string, size: string, status: string }>
+  queries:     number
+  active:      boolean
+  color:       string   // hex
+  createdAt:   string   // ISO 8601
+  updatedAt:   string   // ISO 8601
+}
+```
 
 ---
 
@@ -125,9 +178,18 @@ Ambos servicios son **opcionales en desarrollo local**: si las variables de ento
 
 El sistema de autenticación vive en `src/auth/AuthContext.jsx` y `src/pages/Login.jsx`.
 
-La implementación actual es un **stub de demostración** que acepta cualquier email sin contraseña.
+### Flujo de registro (v0.2.0)
 
-**Para producción:** reemplazar por Microsoft Entra ID con `@azure/msal-react`. No modificar la interfaz del contexto (`login`, `logout`, `user`, `isAuthenticated`) para que el reemplazo sea transparente para el resto de la app.
+| Acción | Rol `estudiante` | Rol `docente` |
+|---|---|---|
+| Auto-registro | ✅ Permitido — se guarda en Cosmos DB | ❌ Bloqueado — se muestra `ROLE_RESTRICTION_MSG` |
+| Inicio de sesión | ✅ Permitido | ✅ Permitido (si fue creado por un admin) |
+
+La implementación actual es un **stub de demostración** enriquecido. En modo demo (sin BD):
+- El login acepta cualquier correo.
+- El registro de estudiantes persiste en localStorage pero no en BD.
+
+**Para producción:** reemplazar por Microsoft Entra ID con `@azure/msal-react`. No modificar la interfaz del contexto (`login`, `register`, `logout`, `user`, `isAuthenticated`) para que el reemplazo sea transparente para el resto de la app.
 
 ---
 
@@ -147,3 +209,7 @@ La implementación actual es un **stub de demostración** que acepta cualquier e
 - Usar las credenciales VITE_* en contextos de producción del lado del cliente.
 - Eliminar el archivo `.gitignore` ni modificar la entrada `.env`.
 - Llamar a hooks de React después de un retorno condicional.
+- Crear un bot en Cosmos DB sin el campo `userId`. Esto rompe la visibilidad por usuario.
+- Guardar objetos `File` del navegador en el campo `files` de un bot. Solo metadatos serializables.
+- Crear cuentas de docente mediante el flujo de auto-registro. Solo a través de administración directa en BD.
+- Cambiar el texto del mensaje `ROLE_RESTRICTION_MSG` fuera de `AuthContext.jsx`. Es la única fuente de verdad.

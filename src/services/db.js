@@ -7,34 +7,43 @@
  * Esto es aceptable SOLO para desarrollo local.
  *
  * En producción: mover toda esta lógica a Azure Functions con
- * Managed Identity + Key Vault, y que el cliente solo llame a /api/bots/*.
+ * Managed Identity + Key Vault, y que el cliente solo llame a /api/*.
  *
- * CORRECCIONES (v0.1.1):
- * - Inicialización lazy del cliente (evita errores con .env vacío).
- * - Sintaxis correcta de containers.create() en Cosmos DB SDK v4.
- * - updateBot() ahora usa correctamente el parámetro `id`.
- * - Eliminados los exports de objetos internos (encapsulamiento).
+ * CAMBIOS (v0.2.0):
+ * - Se añade el contenedor 'users' para persistencia de usuarios.
+ * - getUserByEmail() usa el email como id del documento → lookup O(1).
+ * - Se añade createUser(), userExists().
+ * - Se añade getBotsByUser(userId) para filtrar bots por propietario.
+ * - getBots() se mantiene por compatibilidad (uso interno/admin).
+ * - NOTA DE ARQUITECTURA: el contenedor 'bots' usa partitionKey '/id'.
+ *   Las consultas por userId son cross-partition. Para producción a escala,
+ *   recrear el contenedor con partitionKey '/userId'.
  */
 
 import { CosmosClient } from '@azure/cosmos';
 
-const DATABASE_ID = 'chatedu';
-const CONTAINER_BOTS = 'bots';
+const DATABASE_ID    = 'chatedu';
+const CONTAINER_BOTS  = 'bots';
+const CONTAINER_USERS = 'users';
 
-/** Cliente y referencias inicializados de forma lazy al primer uso. */
-let _client = null;
-let _botsContainer = null;
+/** Referencias lazy — se inicializan en la primera llamada a getCosmosClient(). */
+let _client         = null;
+let _botsContainer  = null;
+let _usersContainer = null;
+
+// ─── Inicialización del cliente ───────────────────────────────────────────────
 
 /**
- * Inicializa el cliente de Cosmos DB la primera vez que se llama.
- * Lanza un error descriptivo si las variables de entorno no están definidas.
- * @returns {{ client: CosmosClient, botsContainer: Container }}
+ * Inicializa el cliente y las referencias a contenedores la primera vez.
+ * No hace llamadas de red; solo construye los objetos del SDK.
+ * @returns {{ client, botsContainer, usersContainer }}
+ * @throws {Error} Si las variables de entorno no están definidas.
  */
 function getCosmosClient() {
-  if (_client) return { client: _client, botsContainer: _botsContainer };
+  if (_client) return { client: _client, botsContainer: _botsContainer, usersContainer: _usersContainer };
 
   const endpoint = import.meta.env.VITE_COSMOS_ENDPOINT;
-  const key = import.meta.env.VITE_COSMOS_KEY;
+  const key      = import.meta.env.VITE_COSMOS_KEY;
 
   if (!endpoint || !key) {
     throw new Error(
@@ -43,30 +52,45 @@ function getCosmosClient() {
     );
   }
 
-  _client = new CosmosClient({ endpoint, key });
-  _botsContainer = _client.database(DATABASE_ID).container(CONTAINER_BOTS);
+  _client         = new CosmosClient({ endpoint, key });
+  const db        = _client.database(DATABASE_ID);
+  _botsContainer  = db.container(CONTAINER_BOTS);
+  _usersContainer = db.container(CONTAINER_USERS);
 
-  return { client: _client, botsContainer: _botsContainer };
+  return { client: _client, botsContainer: _botsContainer, usersContainer: _usersContainer };
 }
 
+// ─── Inicialización de la base de datos ──────────────────────────────────────
+
 /**
- * Verifica la conexión y crea el contenedor 'bots' si no existe.
+ * Verifica la conexión y crea los contenedores 'bots' y 'users' si no existen.
  * Debe llamarse una vez al arrancar la app (en useBots.js).
  */
 export async function initDB() {
   try {
     const { client } = getCosmosClient();
-    const database = client.database(DATABASE_ID);
-    const { resources } = await database.containers.readAll().fetchAll();
-    const containerExists = resources.some((c) => c.id === CONTAINER_BOTS);
+    const database   = client.database(DATABASE_ID);
 
-    if (!containerExists) {
-      // Sintaxis correcta del SDK v4: body y options son argumentos separados.
-      await database.containers.create(
-        { id: CONTAINER_BOTS, partitionKey: { paths: ['/id'] } }
-      );
+    const { resources } = await database.containers.readAll().fetchAll();
+    const existing = new Set(resources.map((c) => c.id));
+
+    if (!existing.has(CONTAINER_BOTS)) {
+      await database.containers.create({
+        id: CONTAINER_BOTS,
+        partitionKey: { paths: ['/id'] },
+      });
       console.log('📦 Contenedor "bots" creado');
     }
+
+    if (!existing.has(CONTAINER_USERS)) {
+      // id === email → partition key coincide con el campo de búsqueda principal.
+      await database.containers.create({
+        id: CONTAINER_USERS,
+        partitionKey: { paths: ['/id'] },
+      });
+      console.log('📦 Contenedor "users" creado');
+    }
+
     console.log('✅ Base de datos conectada');
   } catch (error) {
     if (error.message?.includes('VITE_COSMOS')) {
@@ -78,8 +102,13 @@ export async function initDB() {
   }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// SECCIÓN BOTS
+// ═════════════════════════════════════════════════════════════════════════════
+
 /**
- * Devuelve todos los bots del contenedor.
+ * Devuelve todos los bots del contenedor (sin filtro de usuario).
+ * Uso interno / panel de administración.
  * @returns {Promise<Array>}
  */
 export async function getBots() {
@@ -94,9 +123,34 @@ export async function getBots() {
 }
 
 /**
- * Crea un nuevo bot.
- * @param {Object} bot - Objeto bot con todos sus campos (incluye id).
- * @returns {Promise<Object>} Recurso creado por Cosmos DB.
+ * Devuelve únicamente los bots que pertenecen a un usuario, ordenados por fecha.
+ * Realiza una consulta cross-partition sobre el campo `userId`.
+ * @param {string} userId - Email del usuario propietario (campo `userId` en el documento).
+ * @returns {Promise<Array>}
+ */
+export async function getBotsByUser(userId) {
+  if (!userId) return [];
+  try {
+    const { botsContainer } = getCosmosClient();
+    const querySpec = {
+      query:      'SELECT * FROM c WHERE c.userId = @userId ORDER BY c.createdAt DESC',
+      parameters: [{ name: '@userId', value: userId }],
+    };
+    const { resources } = await botsContainer.items
+      .query(querySpec, { enableCrossPartitionQuery: true })
+      .fetchAll();
+    return resources;
+  } catch (error) {
+    console.error('❌ Error obteniendo bots del usuario:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Crea un nuevo bot en Cosmos DB.
+ * El objeto debe incluir `id` (partition key) y `userId` (email del propietario).
+ * @param {Object} bot
+ * @returns {Promise<Object>} Recurso creado.
  */
 export async function createBot(bot) {
   try {
@@ -111,14 +165,13 @@ export async function createBot(bot) {
 
 /**
  * Actualiza (upsert) un bot existente.
- * @param {string} id - ID del bot a actualizar.
- * @param {Object} updates - Objeto con los campos actualizados (debe incluir `id`).
- * @returns {Promise<Object>} Recurso actualizado.
+ * @param {string} id - ID del bot.
+ * @param {Object} updates - Campos actualizados. Debe incluir `id` y `userId`.
+ * @returns {Promise<Object>}
  */
 export async function updateBot(id, updates) {
   try {
     const { botsContainer } = getCosmosClient();
-    // Garantizamos que el objeto enviado a upsert siempre lleva el id correcto.
     const payload = { ...updates, id };
     const { resource } = await botsContainer.items.upsert(payload);
     return resource;
@@ -130,7 +183,7 @@ export async function updateBot(id, updates) {
 
 /**
  * Elimina un bot por su ID.
- * @param {string} id - ID del bot a eliminar.
+ * @param {string} id
  * @returns {Promise<boolean>}
  */
 export async function deleteBot(id) {
@@ -146,16 +199,80 @@ export async function deleteBot(id) {
 
 /**
  * Obtiene un bot por su ID.
- * @param {string} id - ID del bot.
+ * @param {string} id
  * @returns {Promise<Object|null>}
  */
 export async function getBotById(id) {
   try {
     const { botsContainer } = getCosmosClient();
     const { resource } = await botsContainer.item(id, id).read();
-    return resource;
+    return resource ?? null;
   } catch (error) {
+    if (error.code === 404 || error.statusCode === 404) return null;
     console.error('❌ Error obteniendo bot por ID:', error.message);
     return null;
   }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SECCIÓN USUARIOS
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Crea un nuevo usuario en Cosmos DB.
+ *
+ * Esquema del documento (id === email para lookup O(1) por partition key):
+ * {
+ *   id:        string   // === email
+ *   email:     string
+ *   name:      string
+ *   role:      'estudiante' | 'docente'
+ *   createdAt: string   // ISO 8601
+ * }
+ *
+ * REGLA DE ROL: la validación de rol (bloqueo de docentes) se realiza en
+ * AuthContext.jsx ANTES de llamar a esta función. Esta función no valida roles.
+ *
+ * @param {Object} userData - Debe incluir { id, email, name, role, createdAt }.
+ * @returns {Promise<Object>} Recurso creado.
+ * @throws {Error} Si el usuario ya existe (409) o hay error de red.
+ */
+export async function createUser(userData) {
+  try {
+    const { usersContainer } = getCosmosClient();
+    const { resource } = await usersContainer.items.create(userData);
+    return resource;
+  } catch (error) {
+    console.error('❌ Error creando usuario:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Busca un usuario por email. Usa el email como id del documento → O(1) sin cross-partition.
+ * @param {string} email
+ * @returns {Promise<Object|null>} Documento del usuario, o null si no existe.
+ */
+export async function getUserByEmail(email) {
+  if (!email) return null;
+  try {
+    const { usersContainer } = getCosmosClient();
+    const { resource } = await usersContainer.item(email, email).read();
+    return resource ?? null;
+  } catch (error) {
+    if (error.code === 404 || error.statusCode === 404) return null;
+    if (error.message?.includes('VITE_COSMOS')) return null;
+    console.warn('⚠️ Error buscando usuario:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Verifica si ya existe un usuario con el email dado.
+ * @param {string} email
+ * @returns {Promise<boolean>}
+ */
+export async function userExists(email) {
+  const user = await getUserByEmail(email);
+  return user !== null;
 }
