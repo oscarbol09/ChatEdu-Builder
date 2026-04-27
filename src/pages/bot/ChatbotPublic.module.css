@@ -1,0 +1,366 @@
+/* ChatbotPublic.module.css
+ * Estilos de la vista pública del chatbot educativo.
+ * Diseñada para funcionar tanto en pantalla completa como en iframe.
+ * No comparte estilos con la app principal (sin sidebar, sin navbar).
+ */
+
+/* ── Layout raíz ────────────────────────────────────────────────────────── */
+.chatWrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;          /* dynamic viewport height — correcto en móvil */
+  width: 100%;
+  background: var(--color-background-primary);
+  overflow: hidden;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  background: var(--color-brand-900);
+  flex-shrink: 0;
+}
+
+.avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--color-brand-500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.headerInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.botName {
+  margin: 0 0 2px;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.botMeta {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.statusBadge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  animation: pulse 2s infinite;
+}
+
+.statusLabel {
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* ── Área de mensajes ───────────────────────────────────────────────────── */
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scroll-behavior: smooth;
+}
+
+.messages::-webkit-scrollbar        { width: 4px; }
+.messages::-webkit-scrollbar-track  { background: transparent; }
+.messages::-webkit-scrollbar-thumb  { background: var(--color-border-primary); border-radius: 4px; }
+
+.messageRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.messageRowUser {
+  justify-content: flex-end;
+}
+
+.botAvatarSmall {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-brand-500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+.bubble {
+  max-width: 76%;
+  padding: 11px 15px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.bubbleBot {
+  background: var(--color-background-secondary);
+  color: var(--color-text-primary);
+  border-radius: 4px 18px 18px 18px;
+}
+
+.bubbleUser {
+  background: var(--color-brand-500);
+  color: #fff;
+  border-radius: 18px 18px 4px 18px;
+}
+
+/* ── Typing indicator ───────────────────────────────────────────────────── */
+.typingRow {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.typingBubble {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 12px 16px;
+  background: var(--color-background-secondary);
+  border-radius: 4px 18px 18px 18px;
+}
+
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-brand-500);
+  animation: bounce 1.2s infinite;
+}
+
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: translateY(0); }
+  40%           { transform: translateY(-7px); }
+}
+
+/* ── Input area ─────────────────────────────────────────────────────────── */
+.inputArea {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--color-background-primary);
+  border-top: 1px solid var(--color-border-secondary);
+  flex-shrink: 0;
+}
+
+.input {
+  flex: 1;
+  padding: 11px 16px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-full);
+  font-family: var(--font-body);
+  font-size: 14px;
+  background: var(--color-background-secondary);
+  color: var(--color-text-primary);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-brand-500);
+  box-shadow: 0 0 0 3px rgba(61, 68, 168, 0.1);
+}
+
+.sendBtn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--color-brand-500);
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.sendBtn:hover:not(:disabled) {
+  background: var(--color-brand-900);
+}
+
+.sendBtn:active:not(:disabled) {
+  transform: scale(0.93);
+}
+
+.sendBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+.footer {
+  padding: 6px 16px 10px;
+  text-align: center;
+  font-family: var(--font-body);
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+/* ── Estado de carga (skeleton) ─────────────────────────────────────────── */
+.skeletonWrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--color-background-primary);
+  overflow: hidden;
+}
+
+.skeletonHeader {
+  height: 66px;
+  background: var(--color-brand-900);
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.skeletonMessages {
+  flex: 1;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.skeletonBubble {
+  height: 42px;
+  border-radius: 18px;
+  background: var(--color-background-secondary);
+  animation: shimmer 1.4s infinite linear;
+  background-image: linear-gradient(
+    90deg,
+    var(--color-background-secondary) 25%,
+    var(--color-background-tertiary) 50%,
+    var(--color-background-secondary) 75%
+  );
+  background-size: 400px 100%;
+}
+
+.skeletonBot  { width: 55%; align-self: flex-start; }
+.skeletonUser { width: 40%; align-self: flex-end; }
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeletonInput {
+  height: 66px;
+  background: var(--color-background-secondary);
+  border-top: 1px solid var(--color-border-secondary);
+  flex-shrink: 0;
+}
+
+/* ── Bot no encontrado ──────────────────────────────────────────────────── */
+.notFoundWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100dvh;
+  background: var(--color-background-secondary);
+  padding: 20px;
+}
+
+.notFoundCard {
+  background: var(--color-background-primary);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-xl);
+  padding: 40px 32px;
+  max-width: 400px;
+  width: 100%;
+  text-align: center;
+  box-shadow: var(--shadow-md);
+}
+
+.notFoundIcon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.notFoundTitle {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 10px;
+}
+
+.notFoundText {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.notFoundId {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--color-background-secondary);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  margin-bottom: 16px;
+  word-break: break-all;
+  max-width: 100%;
+}
+
+.notFoundHint {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  line-height: 1.6;
+}
+
+/* ── Responsive: modo iframe (ancho < 500px) ────────────────────────────── */
+@media (max-width: 500px) {
+  .bubble    { max-width: 88%; font-size: 13px; }
+  .botName   { font-size: 13px; }
+  .sendBtn   { width: 38px; height: 38px; }
+  .input     { font-size: 13px; }
+}
