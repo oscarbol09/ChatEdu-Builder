@@ -1,13 +1,22 @@
 /**
  * @fileoverview Capa de acceso a Azure Cosmos DB.
  *
- * ADVERTENCIA DE SEGURIDAD:
- * Esta implementación usa la clave primaria desde variables de entorno VITE_*,
- * lo que la expone en el bundle del navegador.
- * Esto es aceptable SOLO para desarrollo local.
+ * ADVERTENCIA DE SEGURIDAD / CORS (v0.3.3):
+ * El SDK @azure/cosmos fue diseñado para Node.js. Cuando se ejecuta en el
+ * browser, las peticiones fetch a *.documents.azure.com son bloqueadas por
+ * CORS porque Cosmos DB no incluye 'Access-Control-Allow-Origin' en sus
+ * respuestas para llamadas directas desde dominios de terceros.
  *
- * En producción: mover toda esta lógica a Azure Functions con
- * Managed Identity + Key Vault, y que el cliente solo llame a /api/*.
+ * SOLUCIÓN IMPLEMENTADA:
+ * Todas las funciones comprueban `isBrowser()` antes de intentar cualquier
+ * operación de red. En el browser devuelven null / [] silenciosamente, y el
+ * resto de la app usa localStorage + ?d= (config embebida en URL) como
+ * almacenamiento principal en producción.
+ *
+ * En un entorno Node.js (Azure Functions, SSR) el SDK funciona con normalidad.
+ *
+ * Ruta de migración futura: implementar /api/* en Azure Functions con
+ * Managed Identity + Key Vault para acceso seguro desde el cliente.
  *
  * CAMBIOS (v0.2.0):
  * - Se añade el contenedor 'users' para persistencia de usuarios.
@@ -22,7 +31,7 @@
 
 import { CosmosClient } from '@azure/cosmos';
 
-const DATABASE_ID    = 'chatedu';
+const DATABASE_ID     = 'chatedu';
 const CONTAINER_BOTS  = 'bots';
 const CONTAINER_USERS = 'users';
 
@@ -30,6 +39,17 @@ const CONTAINER_USERS = 'users';
 let _client         = null;
 let _botsContainer  = null;
 let _usersContainer = null;
+
+// ─── Guard de entorno ─────────────────────────────────────────────────────────
+
+/**
+ * Devuelve true si el código se ejecuta en el browser.
+ * El SDK de Cosmos DB no puede hacer peticiones desde el browser por CORS.
+ * Todas las funciones exportadas retornan vacío si esto es true.
+ */
+function isBrowser() {
+  return typeof window !== 'undefined';
+}
 
 // ─── Inicialización del cliente ───────────────────────────────────────────────
 
@@ -65,8 +85,13 @@ function getCosmosClient() {
 /**
  * Verifica la conexión y crea los contenedores 'bots' y 'users' si no existen.
  * Debe llamarse una vez al arrancar la app (en useBots.js).
+ * En el browser lanza error inmediatamente para que useBots caiga al fallback.
  */
 export async function initDB() {
+  if (isBrowser()) {
+    throw new Error('Cosmos DB no disponible en el browser (CORS). Usando localStorage.');
+  }
+
   try {
     const { client } = getCosmosClient();
     const database   = client.database(DATABASE_ID);
@@ -83,7 +108,6 @@ export async function initDB() {
     }
 
     if (!existing.has(CONTAINER_USERS)) {
-      // id === email → partition key coincide con el campo de búsqueda principal.
       await database.containers.create({
         id: CONTAINER_USERS,
         partitionKey: { paths: ['/id'] },
@@ -112,6 +136,7 @@ export async function initDB() {
  * @returns {Promise<Array>}
  */
 export async function getBots() {
+  if (isBrowser()) return [];
   try {
     const { botsContainer } = getCosmosClient();
     const { resources } = await botsContainer.items.readAll().fetchAll();
@@ -124,11 +149,11 @@ export async function getBots() {
 
 /**
  * Devuelve únicamente los bots que pertenecen a un usuario, ordenados por fecha.
- * Realiza una consulta cross-partition sobre el campo `userId`.
- * @param {string} userId - Email del usuario propietario (campo `userId` en el documento).
+ * @param {string} userId - Email del usuario propietario.
  * @returns {Promise<Array>}
  */
 export async function getBotsByUser(userId) {
+  if (isBrowser()) return [];
   if (!userId) return [];
   try {
     const { botsContainer } = getCosmosClient();
@@ -148,11 +173,11 @@ export async function getBotsByUser(userId) {
 
 /**
  * Crea un nuevo bot en Cosmos DB.
- * El objeto debe incluir `id` (partition key) y `userId` (email del propietario).
  * @param {Object} bot
  * @returns {Promise<Object>} Recurso creado.
  */
 export async function createBot(bot) {
+  if (isBrowser()) return bot; // en browser, el caller ya lo guarda en localStorage
   try {
     const { botsContainer } = getCosmosClient();
     const { resource } = await botsContainer.items.create(bot);
@@ -166,10 +191,11 @@ export async function createBot(bot) {
 /**
  * Actualiza (upsert) un bot existente.
  * @param {string} id - ID del bot.
- * @param {Object} updates - Campos actualizados. Debe incluir `id` y `userId`.
+ * @param {Object} updates - Campos actualizados.
  * @returns {Promise<Object>}
  */
 export async function updateBot(id, updates) {
+  if (isBrowser()) return updates;
   try {
     const { botsContainer } = getCosmosClient();
     const payload = { ...updates, id };
@@ -187,6 +213,7 @@ export async function updateBot(id, updates) {
  * @returns {Promise<boolean>}
  */
 export async function deleteBot(id) {
+  if (isBrowser()) return true;
   try {
     const { botsContainer } = getCosmosClient();
     await botsContainer.item(id, id).delete();
@@ -199,10 +226,12 @@ export async function deleteBot(id) {
 
 /**
  * Obtiene un bot por su ID.
+ * En el browser siempre retorna null (CORS). ChatbotPublic usa ?d= como fallback.
  * @param {string} id
  * @returns {Promise<Object|null>}
  */
 export async function getBotById(id) {
+  if (isBrowser()) return null;
   try {
     const { botsContainer } = getCosmosClient();
     const { resource } = await botsContainer.item(id, id).read();
@@ -220,24 +249,12 @@ export async function getBotById(id) {
 
 /**
  * Crea un nuevo usuario en Cosmos DB.
- *
- * Esquema del documento (id === email para lookup O(1) por partition key):
- * {
- *   id:        string   // === email
- *   email:     string
- *   name:      string
- *   role:      'estudiante' | 'docente'
- *   createdAt: string   // ISO 8601
- * }
- *
- * REGLA DE ROL: la validación de rol (bloqueo de docentes) se realiza en
- * AuthContext.jsx ANTES de llamar a esta función. Esta función no valida roles.
- *
- * @param {Object} userData - Debe incluir { id, email, name, role, createdAt }.
- * @returns {Promise<Object>} Recurso creado.
- * @throws {Error} Si el usuario ya existe (409) o hay error de red.
+ * En el browser retorna el objeto directamente (AuthContext cae a modo demo).
+ * @param {Object} userData
+ * @returns {Promise<Object>}
  */
 export async function createUser(userData) {
+  if (isBrowser()) return userData;
   try {
     const { usersContainer } = getCosmosClient();
     const { resource } = await usersContainer.items.create(userData);
@@ -249,11 +266,13 @@ export async function createUser(userData) {
 }
 
 /**
- * Busca un usuario por email. Usa el email como id del documento → O(1) sin cross-partition.
+ * Busca un usuario por email.
+ * En el browser siempre retorna null (AuthContext usa modo demo).
  * @param {string} email
- * @returns {Promise<Object|null>} Documento del usuario, o null si no existe.
+ * @returns {Promise<Object|null>}
  */
 export async function getUserByEmail(email) {
+  if (isBrowser()) return null;
   if (!email) return null;
   try {
     const { usersContainer } = getCosmosClient();
