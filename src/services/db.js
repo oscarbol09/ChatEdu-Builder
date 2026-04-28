@@ -1,37 +1,89 @@
 /**
  * @fileoverview Capa de acceso a Azure Cosmos DB — cliente React/Vite.
  *
- * v1.0.0 — Migración a Azure Functions proxy (Paso 1 de seguridad).
+ * v2.0.0 — Paso 4: Añade el Bearer token de MSAL a todas las peticiones
+ * autenticadas hacia el backend.
  *
- * CAMBIO DE ARQUITECTURA:
- * Esta capa ya NO usa el SDK @azure/cosmos ni credenciales VITE_*.
- * Todas las operaciones se delegan a la Azure Function App en /api/bots
- * y /api/users, que gestiona las credenciales de forma segura en el servidor.
+ * CAMBIO RESPECTO A v1.x:
+ * Las peticiones a /api/bots y /api/users ahora incluyen el header
+ * Authorization: Bearer <access_token> obtenido de MSAL de forma silenciosa.
  *
- * Las firmas de todas las funciones exportadas son idénticas a la versión
- * anterior para que ningún hook ni componente requiera modificación.
+ * Si MSAL no está configurado (modo demo), las peticiones se envían sin token
+ * y el middleware requireAuth del backend las acepta en entorno local
+ * (NODE_ENV=development) o las rechaza en producción.
  *
- * En desarrollo local, Vite redirige /api → http://localhost:7071
- * mediante el proxy configurado en vite.config.js.
+ * Las firmas de todas las funciones exportadas son idénticas a v1.x.
+ *
+ * REGLA AGENT.md §3:
+ * Este archivo sigue siendo el único punto de acceso a /api/bots y /api/users.
  */
 
-// ─── Helper interno ───────────────────────────────────────────────────────────
+import { msalInstance } from '../auth/AuthContext.jsx';
+
+// ─── Scopes de acceso a la API ────────────────────────────────────────────────
+
+// Para llamadas al propio backend de SWA / Azure Functions:
+// El scope estándar para APIs protegidas con la misma aplicación Entra ID es
+// `api://<client-id>/<scope>`. Si no tienes scopes de API definidos,
+// usa el scope de Graph para autenticar la identidad del usuario.
+const API_SCOPES = import.meta.env.VITE_ENTRA_CLIENT_ID
+  ? [`api://${import.meta.env.VITE_ENTRA_CLIENT_ID}/user_impersonation`]
+  : [];
+
+// ─── Helper: obtener access token silenciosamente ─────────────────────────────
 
 /**
- * Envuelve fetch con manejo de errores HTTP uniforme.
- * Lanza un Error con el mensaje del servidor si el status no es 2xx.
+ * Obtiene el access token de MSAL de forma silenciosa para la cuenta activa.
+ * Devuelve null si MSAL no está configurado o si no hay cuenta activa.
  *
- * @param {string} url
+ * @returns {Promise<string|null>}
+ */
+async function getAccessToken() {
+  if (!msalInstance) return null;
+
+  const account = msalInstance.getActiveAccount()
+    ?? msalInstance.getAllAccounts()[0]
+    ?? null;
+
+  if (!account) return null;
+
+  try {
+    const result = await msalInstance.acquireTokenSilent({
+      scopes:  API_SCOPES.length > 0 ? API_SCOPES : ['openid', 'profile'],
+      account,
+    });
+    return result.accessToken ?? null;
+  } catch {
+    // Si el silent falla (token expirado, interacción requerida), devolver null.
+    // El backend responderá 401 y el usuario deberá re-autenticarse.
+    return null;
+  }
+}
+
+// ─── Helper: fetch autenticado ────────────────────────────────────────────────
+
+/**
+ * Envuelve fetch con manejo de errores HTTP uniforme e inyección del token MSAL.
+ *
+ * @param {string}      url
  * @param {RequestInit} [options]
  * @returns {Promise<any>} JSON parseado de la respuesta.
  */
 async function apiFetch(url, options = {}) {
+  const token = await getAccessToken();
+
+  const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: {
+      'Content-Type':  'application/json',
+      ...authHeader,
+      ...options.headers,
+    },
     ...options,
   });
 
-  if (res.status === 204) return null; // No content (DELETE exitoso)
+  if (res.status === 204) return null;
 
   const data = await res.json().catch(() => ({}));
 
@@ -46,15 +98,7 @@ async function apiFetch(url, options = {}) {
 // Inicialización (mantenida por compatibilidad con useBots.js)
 // ═════════════════════════════════════════════════════════════════════════════
 
-/**
- * En la versión original inicializaba Cosmos DB.
- * Con el proxy, la Function App gestiona la conexión.
- * Esta función se conserva para no romper el hook useBots.js.
- * @returns {Promise<void>}
- */
 export async function initDB() {
-  // No-op: la Function App gestiona la conexión al servidor.
-  // Se mantiene la firma para compatibilidad con useBots.js.
   return Promise.resolve();
 }
 
@@ -62,14 +106,12 @@ export async function initDB() {
 // SECCIÓN BOTS
 // ═════════════════════════════════════════════════════════════════════════════
 
-/**
- * Devuelve todos los bots del usuario.
- * @param {string} userId - Email del propietario.
- * @returns {Promise<Array>}
- */
 export async function getBotsByUser(userId) {
   if (!userId) return [];
   try {
+    // El backend extrae el userId del token; el query param es ignorado
+    // en el backend con auth, pero lo conservamos para compatibilidad
+    // con el modo demo (backend sin auth).
     return await apiFetch(`/api/bots?userId=${encodeURIComponent(userId)}`);
   } catch (err) {
     console.error('❌ getBotsByUser:', err.message);
@@ -77,13 +119,8 @@ export async function getBotsByUser(userId) {
   }
 }
 
-/**
- * Devuelve todos los bots (uso interno / admin).
- * @returns {Promise<Array>}
- */
 export async function getBots() {
   try {
-    // Sin userId devuelve todos — solo para uso administrativo.
     return await apiFetch('/api/bots');
   } catch (err) {
     console.error('❌ getBots:', err.message);
@@ -91,11 +128,6 @@ export async function getBots() {
   }
 }
 
-/**
- * Crea un nuevo bot.
- * @param {Object} bot
- * @returns {Promise<Object>}
- */
 export async function createBot(bot) {
   return apiFetch('/api/bots', {
     method: 'POST',
@@ -103,12 +135,6 @@ export async function createBot(bot) {
   });
 }
 
-/**
- * Actualiza (upsert) un bot existente.
- * @param {string} id
- * @param {Object} updates
- * @returns {Promise<Object>}
- */
 export async function updateBot(id, updates) {
   return apiFetch(`/api/bots/${encodeURIComponent(id)}`, {
     method: 'PUT',
@@ -116,21 +142,11 @@ export async function updateBot(id, updates) {
   });
 }
 
-/**
- * Elimina un bot por su ID.
- * @param {string} id
- * @returns {Promise<boolean>}
- */
 export async function deleteBot(id) {
   await apiFetch(`/api/bots/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return true;
 }
 
-/**
- * Obtiene un bot por su ID.
- * @param {string} id
- * @returns {Promise<Object|null>}
- */
 export async function getBotById(id) {
   try {
     return await apiFetch(`/api/bots/${encodeURIComponent(id)}`);
@@ -145,11 +161,6 @@ export async function getBotById(id) {
 // SECCIÓN USUARIOS
 // ═════════════════════════════════════════════════════════════════════════════
 
-/**
- * Crea un nuevo usuario.
- * @param {Object} userData
- * @returns {Promise<Object>}
- */
 export async function createUser(userData) {
   return apiFetch('/api/users', {
     method: 'POST',
@@ -157,11 +168,6 @@ export async function createUser(userData) {
   });
 }
 
-/**
- * Busca un usuario por email.
- * @param {string} email
- * @returns {Promise<Object|null>}
- */
 export async function getUserByEmail(email) {
   if (!email) return null;
   try {
@@ -173,11 +179,6 @@ export async function getUserByEmail(email) {
   }
 }
 
-/**
- * Verifica si ya existe un usuario con el email dado.
- * @param {string} email
- * @returns {Promise<boolean>}
- */
 export async function userExists(email) {
   const user = await getUserByEmail(email);
   return user !== null;

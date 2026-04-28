@@ -102,7 +102,7 @@ export function useChat(config, documents = []) {
     } finally {
       setLoading(false);
     }
-  }, [input, loading, config]);
+  }, [input, loading, config, documents]);
 
   return { messages, input, loading, bottomRef, setInput, sendMessage };
 }

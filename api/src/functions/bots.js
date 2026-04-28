@@ -15,6 +15,7 @@
 import { app } from '@azure/functions';
 import { getCosmosClient } from '../lib/cosmosClient.js';
 import { corsHeaders, handlePreflight } from '../lib/cors.js';
+import { requireAuth, getCallerPrincipal } from '../lib/auth.js';
 
 // ─── GET /api/bots?userId={email} ─────────────────────────────────────────────
 
@@ -26,13 +27,20 @@ app.http('getBots', {
     const pre = handlePreflight(request);
     if (pre) return pre;
 
+    const authError = requireAuth(request);
+    if (authError) return authError;
+
+    // El userId viene del token (fuente de verdad) para evitar que un usuario
+    // consulte bots de otro pasando un userId arbitrario en el query string.
+    const principal = getCallerPrincipal(request);
+    const userId    = principal.userDetails; // email/UPN del token
+
     try {
-      const userId = request.query.get('userId');
       if (!userId) {
         return {
           status:  400,
           headers: corsHeaders(),
-          body:    JSON.stringify({ error: 'El parámetro userId es obligatorio.' }),
+          body:    JSON.stringify({ error: 'No se pudo determinar el userId del token.' }),
         };
       }
 
@@ -69,6 +77,9 @@ app.http('getBotById', {
     const pre = handlePreflight(request);
     if (pre) return pre;
 
+    const authError = requireAuth(request);
+    if (authError) return authError;
+
     try {
       const id = request.params.id;
       const { botsContainer } = getCosmosClient();
@@ -99,6 +110,9 @@ app.http('createBot', {
     const pre = handlePreflight(request);
     if (pre) return pre;
 
+    const authError = requireAuth(request);
+    if (authError) return authError;
+
     try {
       const bot = await request.json();
 
@@ -109,6 +123,10 @@ app.http('createBot', {
           body:    JSON.stringify({ error: 'El cuerpo debe incluir los campos id y userId.' }),
         };
       }
+
+      // Forzar userId desde el token — nunca confiar en el cliente.
+      const principal = getCallerPrincipal(request);
+      bot.userId = principal.userDetails;
 
       const { botsContainer } = getCosmosClient();
       const { resource } = await botsContainer.items.create(bot);
@@ -130,6 +148,9 @@ app.http('updateBot', {
   handler: async (request, context) => {
     const pre = handlePreflight(request);
     if (pre) return pre;
+
+    const authError = requireAuth(request);
+    if (authError) return authError;
 
     try {
       const id      = request.params.id;
@@ -156,6 +177,9 @@ app.http('deleteBot', {
   handler: async (request, context) => {
     const pre = handlePreflight(request);
     if (pre) return pre;
+
+    const authError = requireAuth(request);
+    if (authError) return authError;
 
     try {
       const id = request.params.id;

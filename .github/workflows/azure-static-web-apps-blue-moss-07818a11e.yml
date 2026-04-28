@@ -24,6 +24,10 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          # Con dos package-lock.json (raíz y api/), hay que indicar cuál
+          # corresponde al frontend. Sin esto el caché no se resuelve
+          # correctamente en todos los runners y npm ci puede fallar.
+          cache-dependency-path: package-lock.json
 
       # ── Tests del frontend (Vitest + jsdom) ───────────────────────────────
       - name: Install frontend dependencies
@@ -34,8 +38,19 @@ jobs:
 
       - name: Run frontend tests
         run: npm run test
+        env:
+          # Necesario para que import.meta.env.VITE_ENABLE_TEST_ADMIN
+          # resuelva a string 'false' y no a undefined en el bundle de test.
+          VITE_ENABLE_TEST_ADMIN: "false"
 
       # ── Tests del backend (Vitest, Node puro) ─────────────────────────────
+      - name: Setup Node.js for backend
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
       - name: Install backend dependencies
         working-directory: ./api
         run: npm ci
@@ -60,15 +75,21 @@ jobs:
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
-        # CAMBIO (Paso 1 de seguridad):
-        # Las variables VITE_COSMOS_*, VITE_STORAGE_* y VITE_GEMINI_API_KEY
-        # fueron ELIMINADAS del frontend y del bundle. Ya NO deben estar aquí.
+        # PASO 1: VITE_COSMOS_*, VITE_STORAGE_* y VITE_GEMINI_API_KEY eliminadas.
         # Las credenciales viven en Application Settings de la Function App.
         #
-        # Solo se inyecta VITE_ENABLE_TEST_ADMIN=false para asegurar que
-        # el bypass admin/admin esté desactivado en producción.
+        # PASO 4: Variables de Entra ID inyectadas desde GitHub Secrets.
+        # Son públicas en OAuth2 (PKCE) pero se gestionan como secrets en CI
+        # para no hardcodear IDs de tenant en el código.
+        # Añadir en GitHub → Settings → Secrets and variables → Actions:
+        #   VITE_ENTRA_CLIENT_ID   → Application (client) ID del registro en Azure AD
+        #   VITE_ENTRA_TENANT_ID   → Directory (tenant) ID
+        #   VITE_ENTRA_REDIRECT_URI → URI de la app en producción
         env:
           VITE_ENABLE_TEST_ADMIN: "false"
+          VITE_ENTRA_CLIENT_ID:    ${{ secrets.VITE_ENTRA_CLIENT_ID }}
+          VITE_ENTRA_TENANT_ID:    ${{ secrets.VITE_ENTRA_TENANT_ID }}
+          VITE_ENTRA_REDIRECT_URI: ${{ secrets.VITE_ENTRA_REDIRECT_URI }}
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_BLUE_MOSS_07818A11E }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}

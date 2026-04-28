@@ -11,8 +11,13 @@ import globals from 'globals';
 
 export default [
   // Archivos ignorados (equivalente al antiguo .eslintignore)
+  // CRÍTICO CI: api/** usa globals de Node (process, Buffer) que no existen
+  // en el entorno de browser que este ESLint asume. Sin esta exclusión,
+  // el lint reporta 'process is not defined' y similares que con
+  // --max-warnings 0 rompen el job de tests en GitHub Actions.
+  // El backend tiene su propio entorno de lint configurado en api/.
   {
-    ignores: ['build/**', 'dist/**', 'node_modules/**'],
+    ignores: ['build/**', 'dist/**', 'node_modules/**', 'api/**'],
   },
 
   // Base recomendada de ESLint

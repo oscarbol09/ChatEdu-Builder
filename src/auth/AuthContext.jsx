@@ -1,220 +1,382 @@
 /**
- * @fileoverview Contexto de autenticación de ChatEdu Builder.
+ * @fileoverview Contexto de autenticación — Microsoft Entra ID vía MSAL (Paso 4).
  *
- * Expone: { user, isAuthenticated, isAuthLoading, login, register, logout }
+ * v2.0.0 — Migración completa de stub demo a @azure/msal-react + @azure/msal-browser.
  *
- * CAMBIOS (v1.0.0 — Paso 1 de seguridad):
- * - TEST_ADMIN ahora requiere VITE_ENABLE_TEST_ADMIN=true en .env para activarse.
- *   En producción esta variable no debe existir o debe ser 'false'.
+ * INTERFAZ PÚBLICA SIN CAMBIOS:
+ *   { user, isAuthenticated, isAuthLoading, login, register, logout }
  *
- * CAMBIOS (v0.3.0):
- * - Se añade `isAuthLoading` para evitar el bug de salto de Login en Azure.
+ * Esta interfaz es idéntica a v1.x para que App.jsx, Login.jsx y
+ * cualquier consumidor de useAuth() no requieran modificación.
  *
- * CAMBIOS (v0.2.0):
- * - Se añade `register()`. Rol 'docente' bloqueado en auto-registro.
- * - `login()` verifica usuario en Cosmos DB (ahora vía proxy /api/users).
+ * ESTRATEGIA DE AUTENTICACIÓN:
+ *   - login()    → MSAL loginPopup() (flujo interactivo OAuth2/OIDC).
+ *   - logout()   → MSAL logoutPopup().
+ *   - register() → no existe en Entra ID (el admin provee cuentas).
+ *                  Se conserva la firma pero lanza el error canónico de
+ *                  restricción de rol, redirigiendo al admin.
+ *   - user       → perfil extraído del ID token de MSAL.
+ *   - isAuthLoading → true mientras MSAL resuelve la sesión SSO silenciosa
+ *                     (equivalente a inProgress !== InteractionStatus.None).
  *
- * NOTA DE PRODUCCIÓN:
- * Reemplazar por Microsoft Entra ID con @azure/msal-react.
- * La interfaz pública no debe cambiar para que el reemplazo sea transparente.
+ * CONFIGURACIÓN:
+ *   Las variables de entorno necesarias son:
+ *     VITE_ENTRA_CLIENT_ID   → Application (client) ID del registro en Azure AD
+ *     VITE_ENTRA_TENANT_ID   → Directory (tenant) ID
+ *     VITE_ENTRA_REDIRECT_URI → URI de redirección registrada (ej: http://localhost:5173)
+ *
+ *   En producción, añadir estas tres variables a Application Settings de
+ *   Azure Static Web Apps (NO son secretos: son públicas en el flujo OAuth2).
+ *
+ * FALLBACK DE DESARROLLO:
+ *   Si VITE_ENTRA_CLIENT_ID no está definida (desarrollo sin Azure AD),
+ *   el contexto cae al modo stub demo con admin/admin para no bloquear
+ *   el trabajo local. El modo demo se indica en consola con un warning.
+ *
+ * REGLA AGENT.md §9:
+ *   isAuthLoading sigue existiendo y el guard en App.jsx sigue siendo válido.
+ *   No eliminar ni bypassear.
  */
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, {
+  createContext, useContext, useState, useEffect, useCallback,
+} from 'react';
+import {
+  PublicClientApplication,
+  InteractionStatus,
+  EventType,
+} from '@azure/msal-browser';
+import { MsalProvider, useMsal } from '@azure/msal-react';
 import { getUserByEmail, createUser } from '../services/db.js';
 
-// ─── Constantes de rol ────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Constantes de rol (sin cambios respecto a v1.x)
+// ═════════════════════════════════════════════════════════════════════════════
 
-/** Roles que no pueden auto-registrarse. Solo un admin los crea directamente en BD. */
 const RESTRICTED_ROLES = new Set(['docente', 'profesor']);
 
-/**
- * Mensaje canónico que se muestra cuando un usuario intenta registrarse como docente.
- * Se exporta para que el componente Login.jsx lo muestre en su propia UI.
- */
 export const ROLE_RESTRICTION_MSG =
   'La creación de cuentas para Docentes/Profesores está restringida. ' +
   'Por favor, comuníquese con el administrador del sistema para solicitar su acceso.';
 
-// ─── Usuario de prueba (testeo) ───────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Configuración MSAL
+// ═════════════════════════════════════════════════════════════════════════════
+
+const ENTRA_CLIENT_ID   = import.meta.env.VITE_ENTRA_CLIENT_ID;
+const ENTRA_TENANT_ID   = import.meta.env.VITE_ENTRA_TENANT_ID   ?? 'common';
+const ENTRA_REDIRECT_URI = import.meta.env.VITE_ENTRA_REDIRECT_URI ?? window.location.origin;
+
+/** true cuando las variables de entorno de Entra ID están configuradas. */
+const MSAL_ENABLED = Boolean(ENTRA_CLIENT_ID);
 
 /**
- * Cuenta de administrador para testeo rápido.
- * Login: email "admin", contraseña "admin".
- * NO requiere Cosmos DB ni variables de entorno.
- *
- * ACTIVACIÓN: solo disponible cuando VITE_ENABLE_TEST_ADMIN=true en .env local.
- * En producción (.env de Azure Static Web Apps o Application Settings),
- * esta variable debe ser 'false' o no estar definida para deshabilitar
- * este bypass completamente y no exponer credenciales en el bundle.
+ * Instancia singleton de PublicClientApplication.
+ * Se crea una sola vez fuera del ciclo de render para evitar múltiples
+ * instancias que causarían errores de "interaction_in_progress".
  */
-const TEST_ADMIN_ENABLED  = import.meta.env.VITE_ENABLE_TEST_ADMIN === 'true';
-const TEST_ADMIN_EMAIL    = 'admin';
-const TEST_ADMIN_PASSWORD = 'admin';
-const TEST_ADMIN_PROFILE  = {
-  id:    'admin',
-  email: 'admin',
-  name:  'Administrador',
-  role:  'docente',
-};
+export let msalInstance = null;
 
-// ─── Contexto ─────────────────────────────────────────────────────────────────
+if (MSAL_ENABLED) {
+  msalInstance = new PublicClientApplication({
+    auth: {
+      clientId:    ENTRA_CLIENT_ID,
+      authority:   `https://login.microsoftonline.com/${ENTRA_TENANT_ID}`,
+      redirectUri: ENTRA_REDIRECT_URI,
+    },
+    cache: {
+      // sessionStorage: la sesión no persiste entre pestañas (más seguro).
+      // Cambiar a 'localStorage' si se necesita persistencia entre pestañas.
+      cacheLocation:         'sessionStorage',
+      storeAuthStateInCookie: false,
+    },
+    system: {
+      loggerOptions: {
+        loggerCallback: (level, message, containsPii) => {
+          if (containsPii) return;
+          if (level === 0) console.error('[MSAL]', message);   // Error
+          if (level === 1) console.warn('[MSAL]', message);    // Warning
+          // Info y Verbose se omiten en producción.
+        },
+      },
+    },
+  });
+} else {
+  console.warn(
+    '[AuthContext] VITE_ENTRA_CLIENT_ID no está definida. ' +
+    'Usando modo stub demo (admin/admin). ' +
+    'Configura las variables VITE_ENTRA_* en .env para usar Entra ID.'
+  );
+}
+
+/** Scopes mínimos para leer el perfil del usuario. */
+const LOGIN_SCOPES = ['openid', 'profile', 'email', 'User.Read'];
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Contexto React
+// ═════════════════════════════════════════════════════════════════════════════
 
 const AuthContext = createContext(null);
 
-// ─── Provider ─────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Modo STUB DEMO (fallback cuando MSAL no está configurado)
+// ═════════════════════════════════════════════════════════════════════════════
 
-export const AuthProvider = ({ children }) => {
+/**
+ * Proveedor de autenticación en modo demo (sin Entra ID).
+ * Conserva el comportamiento de v1.x para no bloquear desarrollo local.
+ * Se activa automáticamente cuando VITE_ENTRA_CLIENT_ID no está definida.
+ */
+function AuthProviderStub({ children }) {
   const [user,          setUser]          = useState(null);
-
-  /**
-   * isAuthLoading: true mientras se lee localStorage en el primer montaje.
-   *
-   * POR QUÉ ES NECESARIO:
-   * Sin este flag, AppInner evalúa isAuthenticated en el primer render
-   * (cuando user === null) y concluye que el usuario NO está autenticado,
-   * mostrando Login. Un tick después, el useEffect hidrata user desde
-   * localStorage y isAuthenticated cambia a true, causando un salto
-   * inmediato al Dashboard sin que el usuario haya introducido credenciales.
-   * En Azure Static Web Apps este comportamiento era consistente porque el
-   * localStorage persiste entre sesiones del navegador.
-   *
-   * Con isAuthLoading=true durante la hidratación, AppInner espera antes
-   * de renderizar Login o Dashboard, eliminando el salto.
-   */
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
-  /** Carga la sesión persistida en localStorage al montar. */
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('chatedu_user');
+      const raw = sessionStorage.getItem('chatedu_user');
       if (raw) setUser(JSON.parse(raw));
     } catch {
-      localStorage.removeItem('chatedu_user');
+      sessionStorage.removeItem('chatedu_user');
     } finally {
-      // Marcar como resuelto SIEMPRE, haya o no sesión guardada.
       setIsAuthLoading(false);
     }
   }, []);
 
-  /** Persiste el usuario en estado y en localStorage. */
-  const _persistUser = (u) => {
+  const _persist = (u) => {
     setUser(u);
-    localStorage.setItem('chatedu_user', JSON.stringify(u));
+    sessionStorage.setItem('chatedu_user', JSON.stringify(u));
   };
 
-  // ─── login ──────────────────────────────────────────────────────────────────
+  const login = useCallback(async ({ email, password, role }) => {
+    if (!email) throw new Error('Ingrese un correo electrónico.');
+    // Bypass admin/admin en modo demo
+    if (
+      import.meta.env.VITE_ENABLE_TEST_ADMIN === 'true' &&
+      email.trim().toLowerCase() === 'admin' &&
+      password === 'admin'
+    ) {
+      _persist({ id: 'admin', email: 'admin', name: 'Administrador', role: 'docente' });
+      return;
+    }
+    const dbUser = await getUserByEmail(email).catch(() => null);
+    _persist(dbUser ?? { email, role, name: email.split('@')[0] });
+  }, []);
+
+  const register = useCallback(async ({ email, name, role }) => {
+    if (RESTRICTED_ROLES.has(role?.toLowerCase())) throw new Error(ROLE_RESTRICTION_MSG);
+    if (!email) throw new Error('Ingrese un correo electrónico.');
+    const existing = await getUserByEmail(email).catch(() => null);
+    if (existing) throw new Error('Ya existe una cuenta con este correo electrónico.');
+    const newUser = {
+      id: email, email,
+      name: (name || '').trim() || email.split('@')[0],
+      role, createdAt: new Date().toISOString(),
+    };
+    await createUser(newUser).catch((e) => console.warn('⚠️ createUser (demo):', e.message));
+    _persist(newUser);
+  }, []);
+
+  const logout = useCallback(() => {
+    setUser(null);
+    sessionStorage.removeItem('chatedu_user');
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{
+      user, isAuthenticated: !!user, isAuthLoading, login, register, logout,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Modo MSAL (Entra ID real)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Proveedor interno que usa los hooks de @azure/msal-react.
+ * Debe estar envuelto en <MsalProvider> (ver AuthProvider abajo).
+ */
+function AuthProviderMsalInner({ children }) {
+  const { instance, accounts, inProgress } = useMsal();
+
+  const [user,    setUser]    = useState(null);
+  const [dbReady, setDbReady] = useState(false);
 
   /**
-   * Inicia sesión con email (y contraseña opcional para el usuario de prueba).
+   * isAuthLoading:
+   *   true  → MSAL todavía está procesando una interacción (login/logout/SSO silencioso).
+   *   false → MSAL está inactivo; podemos leer accounts[] con confianza.
    *
-   * Orden de resolución:
-   *   1. Si VITE_ENABLE_TEST_ADMIN=true Y email === "admin" Y password === "admin" → sesión local.
-   *   2. Verifica el usuario en /api/users vía proxy.
-   *   3. Fallback demo: cualquier correo es válido (solo localStorage).
-   *
-   * @param {{ email: string, role: string, password?: string }} authData
+   * Esto es el equivalente Entra ID del isAuthLoading de v1.x (AGENT.md §9).
    */
-  const login = async (authData) => {
-    if (!authData.email) throw new Error('Ingrese un correo electrónico.');
+  const isAuthLoading = inProgress !== InteractionStatus.None || !dbReady;
 
-    // ── 1. Usuario de prueba admin/admin (solo si está habilitado en .env) ────
-    if (
-      TEST_ADMIN_ENABLED &&
-      authData.email.trim().toLowerCase() === TEST_ADMIN_EMAIL &&
-      authData.password === TEST_ADMIN_PASSWORD
-    ) {
-      _persistUser(TEST_ADMIN_PROFILE);
+  /**
+   * Cuando MSAL resuelve la cuenta activa, construye el perfil de usuario
+   * sincronizando con Cosmos DB (crea el usuario si es la primera vez).
+   */
+  useEffect(() => {
+    const activeAccount = accounts[0] ?? null;
+
+    if (!activeAccount) {
+      setUser(null);
+      setDbReady(true);
       return;
     }
 
-    // ── 2. Verificar en Cosmos DB vía proxy /api/users ────────────────────────
-    const dbUser = await getUserByEmail(authData.email);
+    (async () => {
+      try {
+        const email = activeAccount.username; // UPN del token
+        const name  = activeAccount.name ?? activeAccount.username;
 
-    if (dbUser) {
-      _persistUser({
-        email: dbUser.email,
-        role:  dbUser.role,
-        name:  dbUser.name,
-        id:    dbUser.id,
-      });
-    } else {
-      // ── 3. Modo demo ──────────────────────────────────────────────────────
-      const demoUser = {
-        email: authData.email,
-        role:  authData.role,
-        name:  authData.email.split('@')[0],
-      };
-      _persistUser(demoUser);
-    }
-  };
+        // Verificar/crear usuario en Cosmos DB la primera vez.
+        let dbUser = await getUserByEmail(email).catch(() => null);
+        if (!dbUser) {
+          dbUser = {
+            id: email, email, name,
+            // El rol por defecto para cuentas Entra ID es 'docente';
+            // el admin puede cambiarlo directamente en Cosmos DB.
+            role: 'docente',
+            createdAt: new Date().toISOString(),
+          };
+          await createUser(dbUser).catch((e) =>
+            console.warn('[AuthContext] No se pudo crear usuario en BD:', e.message)
+          );
+        }
 
-  // ─── register ───────────────────────────────────────────────────────────────
+        setUser({
+          id:    dbUser.id    ?? email,
+          email: dbUser.email ?? email,
+          name:  dbUser.name  ?? name,
+          role:  dbUser.role  ?? 'docente',
+        });
+      } catch (err) {
+        console.error('[AuthContext] Error resolviendo perfil de usuario:', err.message);
+        // Fallback: perfil mínimo desde el token para no bloquear la app.
+        setUser({
+          id:    activeAccount.username,
+          email: activeAccount.username,
+          name:  activeAccount.name ?? activeAccount.username,
+          role:  'docente',
+        });
+      } finally {
+        setDbReady(true);
+      }
+    })();
+  }, [accounts]);
 
   /**
-   * Registra un nuevo usuario.
-   *
-   * REGLA: Si el rol es 'docente' o 'profesor', lanza un error con ROLE_RESTRICTION_MSG.
-   *
-   * @param {{ email: string, role: string, name?: string }} regData
-   * @throws {Error} Si el rol está restringido o si el correo ya está registrado.
+   * Suscribirse al evento LOGIN_SUCCESS para actualizar la cuenta activa
+   * después de un loginPopup exitoso.
    */
-  const register = async (regData) => {
-    const role = regData.role?.toLowerCase() ?? '';
+  useEffect(() => {
+    const callbackId = instance.addEventCallback((event) => {
+      if (
+        event.eventType === EventType.LOGIN_SUCCESS &&
+        event.payload?.account
+      ) {
+        instance.setActiveAccount(event.payload.account);
+      }
+    });
+    return () => {
+      if (callbackId) instance.removeEventCallback(callbackId);
+    };
+  }, [instance]);
 
-    if (RESTRICTED_ROLES.has(role)) {
+  /**
+   * login() — abre el popup de Microsoft para autenticación interactiva.
+   * La firma es idéntica a v1.x para no romper Login.jsx.
+   */
+  const login = useCallback(async (_authData) => {
+    // En MSAL el flujo interactivo es completo: email, contraseña y MFA
+    // los gestiona Microsoft. Ignoramos _authData (email/password del form demo).
+    try {
+      await instance.loginPopup({
+        scopes:  LOGIN_SCOPES,
+        prompt:  'select_account', // Siempre muestra el selector de cuenta.
+      });
+    } catch (err) {
+      // El usuario cerró el popup: no es un error grave.
+      if (err.errorCode !== 'user_cancelled') throw err;
+    }
+  }, [instance]);
+
+  /**
+   * register() — en Entra ID no existe auto-registro.
+   * Conservamos la firma para no romper Login.jsx pero informamos al usuario.
+   */
+  const register = useCallback(async ({ role } = {}) => {
+    if (RESTRICTED_ROLES.has(role?.toLowerCase())) {
       throw new Error(ROLE_RESTRICTION_MSG);
     }
+    // Para roles no restringidos también redirigimos: el admin debe crear
+    // la cuenta en Azure AD antes de que el usuario pueda hacer login.
+    throw new Error(
+      'El registro automático no está disponible con autenticación institucional. ' +
+      'Contacte al administrador para obtener acceso.'
+    );
+  }, []);
 
-    if (!regData.email) throw new Error('Ingrese un correo electrónico.');
-
-    const existing = await getUserByEmail(regData.email);
-    if (existing) {
-      throw new Error('Ya existe una cuenta con este correo electrónico.');
-    }
-
-    const newUser = {
-      id:        regData.email,
-      email:     regData.email,
-      name:      (regData.name || '').trim() || regData.email.split('@')[0],
-      role:      regData.role,
-      createdAt: new Date().toISOString(),
-    };
-
+  /**
+   * logout() — cierra la sesión en MSAL y en Azure AD.
+   */
+  const logout = useCallback(async () => {
+    const activeAccount = instance.getActiveAccount() ?? accounts[0];
     try {
-      await createUser(newUser);
-      console.log('✅ Usuario registrado en BD:', newUser.email);
-    } catch (dbError) {
-      console.warn('⚠️ No se pudo guardar el usuario en BD (modo demo):', dbError.message);
+      await instance.logoutPopup({ account: activeAccount });
+    } catch (err) {
+      // Si el popup falla, limpiar el estado local igualmente.
+      console.warn('[AuthContext] logoutPopup falló, limpiando estado local:', err.message);
     }
-
-    _persistUser(newUser);
-  };
-
-  // ─── logout ─────────────────────────────────────────────────────────────────
-
-  const logout = () => {
     setUser(null);
-    localStorage.removeItem('chatedu_user');
-  };
+    setDbReady(false);
+  }, [instance, accounts]);
 
-  // ─── Valor del contexto ──────────────────────────────────────────────────────
+  return (
+    <AuthContext.Provider value={{
+      user,
+      isAuthenticated: !!user,
+      isAuthLoading,
+      login,
+      register,
+      logout,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
 
-  const value = {
-    user,
-    isAuthenticated: !!user,
-    isAuthLoading,
-    login,
-    register,
-    logout,
-  };
+// ═════════════════════════════════════════════════════════════════════════════
+// AuthProvider público (selector automático MSAL vs. stub)
+// ═════════════════════════════════════════════════════════════════════════════
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};
+/**
+ * Envuelve la app con el proveedor correcto según el entorno:
+ *   - MSAL_ENABLED (VITE_ENTRA_CLIENT_ID definida) → MsalProvider + AuthProviderMsalInner
+ *   - Sin configuración Entra ID                   → AuthProviderStub (modo demo)
+ *
+ * App.jsx no necesita cambios: sigue usando <AuthProvider>.
+ */
+export function AuthProvider({ children }) {
+  if (!MSAL_ENABLED) {
+    return <AuthProviderStub>{children}</AuthProviderStub>;
+  }
 
-// ─── Hook de consumo ──────────────────────────────────────────────────────────
+  return (
+    <MsalProvider instance={msalInstance}>
+      <AuthProviderMsalInner>{children}</AuthProviderMsalInner>
+    </MsalProvider>
+  );
+}
 
-export const useAuth = () => {
+// ═════════════════════════════════════════════════════════════════════════════
+// Hook de consumo
+// ═════════════════════════════════════════════════════════════════════════════
+
+export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth debe usarse dentro de un AuthProvider');
   return ctx;
-};
+}

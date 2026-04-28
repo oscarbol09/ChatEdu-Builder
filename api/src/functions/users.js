@@ -13,6 +13,7 @@
 import { app } from '@azure/functions';
 import { getCosmosClient } from '../lib/cosmosClient.js';
 import { corsHeaders, handlePreflight } from '../lib/cors.js';
+import { requireAuth } from '../lib/auth.js';
 
 // ─── GET /api/users/{email} ────────────────────────────────────────────────────
 
@@ -23,6 +24,9 @@ app.http('getUserByEmail', {
   handler: async (request, context) => {
     const pre = handlePreflight(request);
     if (pre) return pre;
+
+    const authError = requireAuth(request);
+    if (authError) return authError;
 
     try {
       const email = request.params.email;
@@ -57,6 +61,9 @@ app.http('createUser', {
   handler: async (request, context) => {
     const pre = handlePreflight(request);
     if (pre) return pre;
+
+    const authError = requireAuth(request);
+    if (authError) return authError;
 
     try {
       const userData = await request.json();

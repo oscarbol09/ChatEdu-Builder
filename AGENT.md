@@ -1,20 +1,22 @@
-## Estado actual del proyecto (v0.4.x)
+## Estado actual del proyecto (v0.5.x — Paso 4 completado)
 
 Esta sección documenta lo que realmente está implementado frente a lo que es roadmap.
 
 | Funcionalidad | Estado | Nota |
 |---|---|---|
-| Chat con Gemini multi-turn | ✅ Implementado | `geminiApi.js` |
-| Inyección de documentos .txt/.md en prompt | ✅ Implementado | `UploadZone` + `geminiApi.js` |
-| Extracción de texto de PDF/DOCX | ❌ Pendiente servidor | Requiere Azure Functions + Tika |
-| Persistencia de bots | ✅ localStorage | Cosmos DB bloqueado por CORS en browser |
-| Persistencia de usuarios | ✅ localStorage | Cosmos DB bloqueado por CORS en browser |
-| Upload real a Azure Blob Storage | ❌ No activo | `storage.js` implementado pero sin Azure Functions de proxy |
-| Autenticación real | ❌ Stub demo | Reemplazar por Entra ID / MSAL |
+| Chat con Gemini multi-turn | ✅ Implementado | `api/src/functions/chat.js` (backend) |
+| Inyección de documentos .txt/.md en prompt | ✅ Implementado | `UploadZone` + `useChat` + `/api/chat` |
+| Extracción de texto de PDF/DOCX | ✅ Implementado | `api/src/lib/extractor.js` (pdf-parse + mammoth) |
+| Persistencia de bots | ✅ Azure Cosmos DB | `/api/bots` — autenticado con token MSAL |
+| Persistencia de usuarios | ✅ Azure Cosmos DB | `/api/users` — autenticado con token MSAL |
+| Upload a Azure Blob Storage | ✅ Implementado | `/api/documents` (multipart/form-data) |
+| Autenticación institucional | ✅ Entra ID (MSAL) | `src/auth/AuthContext.jsx` v2.0 |
+| Autenticación backend | ✅ requireAuth() | `api/src/lib/auth.js` — Bearer token en todas las rutas |
+| Tests frontend | ✅ Vitest + jsdom | `src/test/` — useHashRoute, DeployPanel, db, useChat |
+| Tests backend | ✅ Vitest Node | `api/src/test/extractor.test.js` |
+| CI/CD con tests obligatorios | ✅ GitHub Actions | Test job bloquea el deploy si falla |
+| Lint del frontend | ✅ ESLint 9 | `api/**` excluido correctamente |
 | Analítica real | ❌ Mock | Datos simulados en `mockData.js` |
-| ESLint funcional | ✅ `eslint.config.js` | Flat config para ESLint 9 |
-| Tests | ❌ No hay | A implementar |
-| CI que bloquee regresiones | ❌ No hay | Solo deploy automático |
 
 ---
 

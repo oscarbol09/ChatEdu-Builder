@@ -1,37 +1,94 @@
 /**
  * @fileoverview Pantalla de inicio de sesión y registro.
  *
- * Modos:
- *   'login'    — Inicia sesión con email, contraseña y rol.
- *   'register' — Crea una cuenta nueva. Bloquea el rol 'docente'.
+ * v2.0.0 — Paso 4: Integración con Microsoft Entra ID (MSAL).
  *
- * CAMBIOS (v0.3.0):
- * - Se añade campo de contraseña al modo login. Necesario para que el usuario
- *   admin/admin (TEST_ADMIN en AuthContext) pueda autenticarse correctamente.
- *   En modo demo (BD no disponible) la contraseña no se valida para cuentas
- *   regulares, solo para admin.
+ * MODOS DE RENDERIZADO:
+ *   A) MSAL habilitado (VITE_ENTRA_CLIENT_ID definida):
+ *      Muestra un único botón "Iniciar sesión con Microsoft".
+ *      El flujo OAuth2/OIDC completo (email, contraseña, MFA) lo gestiona
+ *      Microsoft en un popup. No se muestran campos de email/contraseña.
  *
- * CAMBIOS (v0.2.0):
- * - Separación en dos modos con tabs: Iniciar sesión / Crear cuenta.
- * - El rol 'Docente / Profesor' en modo registro muestra el aviso de restricción.
- * - Campos añadidos al registro: Nombre (opcional).
- * - Manejo de estado `loading` para bloquear doble envío.
+ *   B) MSAL no configurado (entorno de desarrollo sin Azure AD):
+ *      Muestra el formulario demo original (email + contraseña + rol).
+ *      El comportamiento es idéntico a v1.x para no bloquear el desarrollo.
  *
- * NOTA DE PRODUCCIÓN:
- * Reemplazar por Microsoft Entra ID (@azure/msal-react).
- * La interfaz de AuthContext (login, register) no cambia, solo la presentación.
+ * La distinción entre modos A y B es transparente para AuthContext:
+ * ambos llaman a login() con la misma firma.
+ *
+ * REGLA AGENT.md §3:
+ * Login.jsx no llama a fetch() directamente. Delega toda autenticación
+ * a useAuth() → AuthContext → MSAL / stub.
  */
 
 import { useState } from 'react';
 import { useAuth, ROLE_RESTRICTION_MSG } from '../auth/AuthContext.jsx';
 import styles from './Login.module.css';
 
-export default function Login() {
+/** Detectar si MSAL está configurado para elegir el modo de UI. */
+const MSAL_ENABLED = Boolean(import.meta.env.VITE_ENTRA_CLIENT_ID);
+
+// ─── Modo A: Botón Microsoft ───────────────────────────────────────────────
+
+function LoginMsal() {
+  const { login } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [err,     setErr]     = useState('');
+
+  const handleMicrosoftLogin = async () => {
+    setErr('');
+    setLoading(true);
+    try {
+      await login({});
+    } catch (error) {
+      setErr(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className={styles.wrapper}>
+      <div className={styles.form}>
+        <h2 className={styles.title}>ChatEdu Builder</h2>
+        <p className={styles.subtitle}>Plataforma de chatbots educativos</p>
+
+        {err && <p className={styles.error}>{err}</p>}
+
+        <button
+          type="button"
+          className={styles.btn}
+          onClick={handleMicrosoftLogin}
+          disabled={loading}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem' }}
+        >
+          {/* Logo de Microsoft en SVG inline — no requiere asset externo */}
+          {!loading && (
+            <svg width="18" height="18" viewBox="0 0 23 23" aria-hidden="true">
+              <rect x="1"  y="1"  width="10" height="10" fill="#f25022" />
+              <rect x="12" y="1"  width="10" height="10" fill="#7fba00" />
+              <rect x="1"  y="12" width="10" height="10" fill="#00a4ef" />
+              <rect x="12" y="12" width="10" height="10" fill="#ffb900" />
+            </svg>
+          )}
+          {loading ? 'Iniciando sesión…' : 'Iniciar sesión con Microsoft'}
+        </button>
+
+        <p className={styles.disclaimer}>
+          Accede con tu cuenta institucional de Microsoft.
+          Si no tienes acceso, contacta al administrador.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modo B: Formulario demo (sin Entra ID configurado) ───────────────────
+
+function LoginDemo() {
   const { login, register } = useAuth();
 
-  /** 'login' | 'register' */
   const [mode,     setMode]     = useState('login');
-
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [name,     setName]     = useState('');
@@ -39,7 +96,6 @@ export default function Login() {
   const [err,      setErr]      = useState('');
   const [loading,  setLoading]  = useState(false);
 
-  /** En modo registro y con rol restringido mostramos el aviso, no el error genérico. */
   const isRestrictedRole = mode === 'register' && role === 'docente';
 
   const switchMode = (newMode) => {
@@ -52,13 +108,8 @@ export default function Login() {
   const onSubmit = async (e) => {
     e.preventDefault();
     if (isRestrictedRole) return;
-
     setErr('');
-    if (!email.trim()) {
-      setErr('Ingrese un correo electrónico.');
-      return;
-    }
-
+    if (!email.trim()) { setErr('Ingrese un correo electrónico.'); return; }
     setLoading(true);
     try {
       if (mode === 'register') {
@@ -73,124 +124,79 @@ export default function Login() {
     }
   };
 
-  const submitLabel = loading
-    ? 'Procesando...'
-    : mode === 'register'
-    ? 'Crear cuenta'
-    : 'Entrar';
-
   return (
     <div className={styles.wrapper}>
       <form className={styles.form} onSubmit={onSubmit} noValidate>
 
-        {/* ── Logo / Título ── */}
         <h2 className={styles.title}>ChatEdu Builder</h2>
         <p className={styles.subtitle}>Plataforma de chatbots educativos</p>
 
-        {/* ── Tabs de modo ── */}
         <div className={styles.tabs}>
-          <button
-            type="button"
+          <button type="button"
             className={`${styles.tab} ${mode === 'login' ? styles.tabActive : ''}`}
-            onClick={() => switchMode('login')}
-          >
+            onClick={() => switchMode('login')}>
             Iniciar sesión
           </button>
-          <button
-            type="button"
+          <button type="button"
             className={`${styles.tab} ${mode === 'register' ? styles.tabActive : ''}`}
-            onClick={() => switchMode('register')}
-          >
+            onClick={() => switchMode('register')}>
             Crear cuenta
           </button>
         </div>
 
-        {/* ── Error genérico ── */}
-        {err && !isRestrictedRole && (
-          <p className={styles.error}>{err}</p>
-        )}
+        {err && !isRestrictedRole && <p className={styles.error}>{err}</p>}
 
-        {/* ── Correo ── */}
         <div className={styles.field}>
-          <label className={styles.label} htmlFor="email">
-            Correo electrónico
-          </label>
-          <input
-            id="email"
+          <label className={styles.label} htmlFor="email">Correo electrónico</label>
+          <input id="email"
             type={mode === 'login' ? 'text' : 'email'}
             className={styles.input}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="username"
             placeholder={mode === 'login' ? 'usuario@ejemplo.com o admin' : 'usuario@ejemplo.com'}
-            required
-          />
+            required />
         </div>
 
-        {/* ── Contraseña (solo en login) ── */}
         {mode === 'login' && (
           <div className={styles.field}>
-            <label className={styles.label} htmlFor="password">
-              Contraseña
-            </label>
-            <input
-              id="password"
-              type="password"
+            <label className={styles.label} htmlFor="password">Contraseña</label>
+            <input id="password" type="password"
               className={styles.input}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
-              placeholder="••••••••"
-            />
+              placeholder="••••••••" />
           </div>
         )}
 
-        {/* ── Nombre (solo en registro) ── */}
         {mode === 'register' && (
           <div className={styles.field}>
             <label className={styles.label} htmlFor="name">
               Nombre <span className={styles.optional}>(opcional)</span>
             </label>
-            <input
-              id="name"
-              type="text"
+            <input id="name" type="text"
               className={styles.input}
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoComplete="name"
-              placeholder="Tu nombre completo"
-            />
+              placeholder="Tu nombre completo" />
           </div>
         )}
 
-        {/* ── Rol ── */}
         <div className={styles.field}>
-          <label className={styles.label} htmlFor="role">
-            Rol
-          </label>
-          <select
-            id="role"
-            className={styles.input}
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-          >
+          <label className={styles.label} htmlFor="role">Rol</label>
+          <select id="role" className={styles.input} value={role}
+            onChange={(e) => setRole(e.target.value)}>
             <option value="estudiante">Estudiante</option>
             <option value="docente">Docente / Profesor</option>
           </select>
         </div>
 
-        {/* ── Aviso de restricción para docentes ── */}
         {isRestrictedRole && (
           <div className={styles.notice} role="alert">
-            <svg
-              className={styles.noticeIcon}
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
+            <svg className={styles.noticeIcon} width="18" height="18"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -199,22 +205,23 @@ export default function Login() {
           </div>
         )}
 
-        {/* ── Botón de acción ── */}
-        <button
-          type="submit"
-          className={styles.btn}
-          disabled={loading || isRestrictedRole}
-        >
-          {submitLabel}
+        <button type="submit" className={styles.btn}
+          disabled={loading || isRestrictedRole}>
+          {loading ? 'Procesando...' : mode === 'register' ? 'Crear cuenta' : 'Entrar'}
         </button>
 
-        {/* ── Nota demo ── */}
         <p className={styles.disclaimer}>
           {mode === 'login'
-            ? 'Demo: usa admin / admin para acceso de testeo. En producción se usará autenticación institucional.'
+            ? 'Demo: usa admin / admin para acceso de testeo. Configura VITE_ENTRA_CLIENT_ID para Entra ID.'
             : 'Las cuentas de Estudiante se guardan en Azure Cosmos DB.'}
         </p>
       </form>
     </div>
   );
+}
+
+// ─── Exportación principal: selector automático ───────────────────────────
+
+export default function Login() {
+  return MSAL_ENABLED ? <LoginMsal /> : <LoginDemo />;
 }
