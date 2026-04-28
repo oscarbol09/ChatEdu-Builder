@@ -16,6 +16,13 @@
  *   null en lugar de Login o Dashboard. Esto elimina el bug donde la app
  *   mostraba el Dashboard directamente en visitas recurrentes en Azure,
  *   saltándose el Login, porque localStorage ya tenía sesión guardada.
+ *
+ * CAMBIOS (v0.3.1) — Fix Bug 1 Deep Linking:
+ * - AppInner ahora lee el hash de la URL con useHashRoute ANTES del guard
+ *   de autenticación. Las rutas /#/bot/:id son públicas y se resuelven
+ *   directamente a ChatbotPublic sin pasar por Login ni Dashboard.
+ *   Antes, useHashRoute existía pero nunca se conectaba al árbol de
+ *   renderizado, por lo que el hash era ignorado en acceso directo.
  */
 
 import { useState } from 'react';
@@ -27,6 +34,8 @@ import Builder from './components/builder/Builder.jsx';
 import Analytics from './components/analytics/Analytics.jsx';
 import { AuthProvider, useAuth } from './auth/AuthContext.jsx';
 import Login from './pages/Login.jsx';
+import ChatbotPublic from './pages/bot/ChatbotPublic.jsx';
+import { useHashRoute } from './router/useHashRoute.js';
 
 /**
  * Shell principal de la aplicación.
@@ -107,8 +116,8 @@ function AppAuthenticated() {
 }
 
 /**
- * Enrutador de autenticación.
- * Decide si mostrar un loader, Login o la app principal.
+ * Enrutador de autenticación y hash.
+ * Decide si mostrar un loader, Login, la app principal o un chatbot público.
  *
  * IMPORTANTE — por qué existe el check de isAuthLoading:
  * AuthContext hidrata `user` desde localStorage en un useEffect (asíncrono).
@@ -117,9 +126,21 @@ function AppAuthenticated() {
  * true y la app saltaría al Dashboard sin que el usuario se autenticara.
  * Esperando a isAuthLoading=false garantizamos que la decisión se tome con
  * el estado de autenticación ya resuelto.
+ *
+ * ORDEN DE RESOLUCIÓN DE RUTAS:
+ * 1. /#/bot/:id  → ChatbotPublic (público, sin auth, resuelto primero)
+ * 2. isAuthLoading → null (esperar hidratación de sesión)
+ * 3. isAuthenticated → AppAuthenticated | Login
  */
 function AppInner() {
   const { isAuthenticated, isAuthLoading } = useAuth();
+  const { route, params } = useHashRoute();
+
+  // Rutas públicas: no requieren autenticación.
+  // Se evalúan ANTES del guard de auth para evitar redirección a Login.
+  if (route === 'bot') {
+    return <ChatbotPublic botId={params.id} />;
+  }
 
   // Esperar a que la sesión de localStorage termine de hidratarse.
   // Sin este guard, la app saltaba el Login en visitas recurrentes en Azure.
