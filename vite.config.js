@@ -7,6 +7,15 @@ export default defineConfig({
   server: {
     port: 5173,
     open: true, // abre el navegador automáticamente al correr `npm run dev`
+    proxy: {
+      // Redirige todas las llamadas a /api/* hacia la Azure Function App local.
+      // Prerequisito: ejecutar `func start` en la carpeta /api antes de `npm run dev`.
+      '/api': {
+        target:       'http://localhost:7071',
+        changeOrigin: true,
+        secure:       false,
+      },
+    },
   },
   build: {
     // 'build' coincide con output_location del workflow de Azure Static Web Apps.

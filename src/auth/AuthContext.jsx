@@ -3,25 +3,20 @@
  *
  * Expone: { user, isAuthenticated, isAuthLoading, login, register, logout }
  *
+ * CAMBIOS (v1.0.0 — Paso 1 de seguridad):
+ * - TEST_ADMIN ahora requiere VITE_ENABLE_TEST_ADMIN=true en .env para activarse.
+ *   En producción esta variable no debe existir o debe ser 'false'.
+ *
  * CAMBIOS (v0.3.0):
- * - Se añade `isAuthLoading` (boolean). Mientras es true, AppInner muestra un
- *   estado de espera en lugar de decidir entre Login y app principal. Esto
- *   SOLUCIONA el bug donde la app saltaba el Login en Azure porque la sesión
- *   persistida en localStorage se restauraba sin pasar por el formulario:
- *   en visitas recurrentes el usuario llegaba directo al Dashboard.
- * - Se añade usuario de prueba admin / contraseña admin para testeo rápido.
- *   Funciona sin BD ni variables de entorno.
+ * - Se añade `isAuthLoading` para evitar el bug de salto de Login en Azure.
  *
  * CAMBIOS (v0.2.0):
- * - Se añade la función `register()` para creación de nuevas cuentas.
- * - Rol 'docente' bloqueado en registro automático.
- * - `login()` ahora es async y verifica el usuario en Cosmos DB si está disponible.
- * - Se exporta ROLE_RESTRICTION_MSG como constante para Login.jsx.
+ * - Se añade `register()`. Rol 'docente' bloqueado en auto-registro.
+ * - `login()` verifica usuario en Cosmos DB (ahora vía proxy /api/users).
  *
  * NOTA DE PRODUCCIÓN:
  * Reemplazar por Microsoft Entra ID con @azure/msal-react.
- * La interfaz pública (login, register, logout, user, isAuthenticated, isAuthLoading)
- * no debe cambiar para que el reemplazo sea transparente en el resto de la app.
+ * La interfaz pública no debe cambiar para que el reemplazo sea transparente.
  */
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
@@ -46,8 +41,13 @@ export const ROLE_RESTRICTION_MSG =
  * Cuenta de administrador para testeo rápido.
  * Login: email "admin", contraseña "admin".
  * NO requiere Cosmos DB ni variables de entorno.
- * ELIMINAR o proteger antes de pasar a producción real con usuarios reales.
+ *
+ * ACTIVACIÓN: solo disponible cuando VITE_ENABLE_TEST_ADMIN=true en .env local.
+ * En producción (.env de Azure Static Web Apps o Application Settings),
+ * esta variable debe ser 'false' o no estar definida para deshabilitar
+ * este bypass completamente y no exponer credenciales en el bundle.
  */
+const TEST_ADMIN_ENABLED  = import.meta.env.VITE_ENABLE_TEST_ADMIN === 'true';
 const TEST_ADMIN_EMAIL    = 'admin';
 const TEST_ADMIN_PASSWORD = 'admin';
 const TEST_ADMIN_PROFILE  = {
@@ -108,8 +108,8 @@ export const AuthProvider = ({ children }) => {
    * Inicia sesión con email (y contraseña opcional para el usuario de prueba).
    *
    * Orden de resolución:
-   *   1. Si email === "admin" y password === "admin" → sesión de testeo local.
-   *   2. Si Cosmos DB está disponible → verifica que el usuario exista en BD.
+   *   1. Si VITE_ENABLE_TEST_ADMIN=true Y email === "admin" Y password === "admin" → sesión local.
+   *   2. Verifica el usuario en /api/users vía proxy.
    *   3. Fallback demo: cualquier correo es válido (solo localStorage).
    *
    * @param {{ email: string, role: string, password?: string }} authData
@@ -117,8 +117,9 @@ export const AuthProvider = ({ children }) => {
   const login = async (authData) => {
     if (!authData.email) throw new Error('Ingrese un correo electrónico.');
 
-    // ── 1. Usuario de prueba admin/admin ─────────────────────────────────────
+    // ── 1. Usuario de prueba admin/admin (solo si está habilitado en .env) ────
     if (
+      TEST_ADMIN_ENABLED &&
       authData.email.trim().toLowerCase() === TEST_ADMIN_EMAIL &&
       authData.password === TEST_ADMIN_PASSWORD
     ) {
@@ -126,7 +127,7 @@ export const AuthProvider = ({ children }) => {
       return;
     }
 
-    // ── 2. Verificar en Cosmos DB ─────────────────────────────────────────────
+    // ── 2. Verificar en Cosmos DB vía proxy /api/users ────────────────────────
     const dbUser = await getUserByEmail(authData.email);
 
     if (dbUser) {

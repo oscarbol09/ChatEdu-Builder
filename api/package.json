@@ -1,0 +1,18 @@
+{
+  "name": "chatedu-api",
+  "version": "1.0.0",
+  "description": "Azure Functions backend — proxy seguro para Cosmos DB, Blob Storage y Gemini API",
+  "type": "module",
+  "main": "src/functions/*.js",
+  "scripts": {
+    "start": "func start",
+    "build": "echo 'No build step required for Node.js Azure Functions'"
+  },
+  "dependencies": {
+    "@azure/cosmos": "^4.9.3",
+    "@azure/functions": "^4.5.0",
+    "@azure/storage-blob": "^12.31.0",
+    "mammoth": "^1.8.0",
+    "pdf-parse": "^1.1.1"
+  }
+}

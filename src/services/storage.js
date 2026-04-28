@@ -1,134 +1,99 @@
 /**
- * @fileoverview Capa de acceso a Azure Blob Storage.
+ * @fileoverview Capa de acceso a Azure Blob Storage — cliente React/Vite.
  *
- * ADVERTENCIA DE SEGURIDAD:
- * Esta implementación usa la connection string completa desde variables de
- * entorno VITE_*, lo que la expone en el bundle del navegador.
- * Esto es aceptable SOLO para desarrollo local.
+ * v1.0.0 — Migración a Azure Functions proxy (Paso 1 de seguridad).
  *
- * En producción: mover toda esta lógica a una Azure Function con
- * Managed Identity, y que el cliente solo llame a /api/documents/*.
+ * CAMBIO DE ARQUITECTURA:
+ * Esta capa ya NO usa el SDK @azure/storage-blob ni VITE_STORAGE_CONNECTION_STRING.
+ * Todas las operaciones se delegan a /api/documents en la Azure Function App.
  *
- * CAMBIO DE SEGURIDAD (v0.1.1):
- * Se eliminó `publicAccessLevel: 'blob'` al crear el contenedor.
- * Los documentos de los estudiantes son privados por defecto.
- * El acceso se gestiona a través de SAS tokens generados en servidor
- * (a implementar en la migración a Azure Functions).
+ * Las firmas de las funciones exportadas son idénticas a la versión anterior
+ * para no romper los componentes que las consumen (UploadZone, etc.).
+ *
+ * En desarrollo local, Vite redirige /api → http://localhost:7071.
  */
 
-import { BlobServiceClient } from '@azure/storage-blob';
-
-const connectionString = import.meta.env.VITE_STORAGE_CONNECTION_STRING;
-const containerName = 'documents';
+// ─── Inicialización (mantenida por compatibilidad) ─────────────────────────────
 
 /**
- * Inicializa el cliente de Blob Storage de forma lazy para evitar
- * errores si la connection string no está definida en el entorno actual.
- */
-function getClients() {
-  if (!connectionString) {
-    throw new Error(
-      'VITE_STORAGE_CONNECTION_STRING no está definida. ' +
-      'Agrega esta variable al archivo .env del proyecto.'
-    );
-  }
-  const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
-  const containerClient = blobServiceClient.getContainerClient(containerName);
-  return { blobServiceClient, containerClient };
-}
-
-/**
- * Verifica que el contenedor existe. Lo crea sin acceso público si no existe.
- * El acceso a blobs individuales se gestiona mediante SAS tokens.
+ * En la versión original verificaba/creaba el contenedor de Blob Storage.
+ * Con el proxy, la Function App gestiona el contenedor.
+ * @returns {Promise<void>}
  */
 export async function initStorage() {
-  try {
-    const { blobServiceClient, containerClient } = getClients();
-    await containerClient.getProperties();
-    console.log('✅ Storage conectado');
-  } catch (error) {
-    if (error.statusCode === 404) {
-      const { blobServiceClient } = getClients();
-      // Sin publicAccessLevel → acceso privado por defecto (seguro)
-      await blobServiceClient.createContainer(containerName);
-      console.log('📦 Contenedor de documentos creado (acceso privado)');
-    } else if (error.message?.includes('VITE_STORAGE_CONNECTION_STRING')) {
-      console.warn('⚠️ Storage no disponible:', error.message);
-    } else {
-      console.error('❌ Error de Storage:', error.message);
-    }
-  }
+  // No-op: la Function App crea el contenedor en el primer upload si no existe.
+  return Promise.resolve();
 }
+
+// ─── uploadDocument ────────────────────────────────────────────────────────────
 
 /**
- * Sube un archivo al contenedor del bot indicado.
+ * Sube un archivo al contenedor del bot indicado vía Azure Function.
+ *
  * @param {string} botId - ID del bot propietario del documento.
- * @param {File} file - Archivo a subir.
- * @returns {Promise<Object>} Metadatos del blob creado.
+ * @param {File}   file  - Archivo a subir (objeto File del navegador).
+ * @returns {Promise<Object>} Metadatos del blob: { name, size, type, blobName, uploadedAt }
  */
 export async function uploadDocument(botId, file) {
-  try {
-    const { containerClient } = getClients();
-    const blobName = `${botId}/${Date.now()}_${file.name}`;
-    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+  const formData = new FormData();
+  formData.append('botId', botId);
+  formData.append('file',  file);
 
-    await blockBlobClient.uploadBrowserData(file);
+  const res = await fetch('/api/documents', {
+    method: 'POST',
+    body:   formData,
+    // No establecer Content-Type: el navegador lo pone automáticamente con el boundary correcto.
+  });
 
-    return {
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      // Nota: la URL directa del blob no es accesible públicamente.
-      // En producción, generar un SAS token de corta duración desde el servidor.
-      blobName,
-      uploadedAt: new Date().toISOString(),
-    };
-  } catch (error) {
-    console.error('❌ Error subiendo documento:', error.message);
-    throw error;
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(data.error ?? `Error HTTP ${res.status} al subir documento`);
   }
+
+  return data;
 }
+
+// ─── deleteDocument ────────────────────────────────────────────────────────────
 
 /**
  * Elimina un documento del Storage.
- * @param {string} botId - ID del bot propietario.
- * @param {string} fileName - Nombre del archivo (sin el prefijo botId/).
+ *
+ * @param {string} botId    - ID del bot propietario.
+ * @param {string} fileName - blobName completo (con prefijo botId/) o nombre limpio.
+ * @returns {Promise<boolean>}
  */
 export async function deleteDocument(botId, fileName) {
-  try {
-    const { containerClient } = getClients();
-    const blobName = `${botId}/${fileName}`;
-    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-    await blockBlobClient.delete();
-    return true;
-  } catch (error) {
-    console.error('❌ Error eliminando documento:', error.message);
-    throw error;
-  }
+  const encodedBotId    = encodeURIComponent(botId);
+  const encodedFileName = encodeURIComponent(fileName);
+
+  const res = await fetch(`/api/documents/${encodedBotId}/${encodedFileName}`, {
+    method: 'DELETE',
+  });
+
+  if (res.status === 204) return true;
+
+  const data = await res.json().catch(() => ({}));
+  throw new Error(data.error ?? `Error HTTP ${res.status} al eliminar documento`);
 }
+
+// ─── listDocuments ─────────────────────────────────────────────────────────────
 
 /**
  * Lista los documentos asociados a un bot.
+ *
  * @param {string} botId - ID del bot.
- * @returns {Promise<Array>} Lista de metadatos de blobs.
+ * @returns {Promise<Array>} Lista de metadatos: [{ name, size, blobName, uploadedAt }]
  */
 export async function listDocuments(botId) {
-  try {
-    const { containerClient } = getClients();
-    const blobs = [];
-    for await (const blob of containerClient.listBlobsFlat({ prefix: `${botId}/` })) {
-      if (blob.properties.lastModified) {
-        blobs.push({
-          name: blob.name.split('/')[1],
-          size: blob.properties.contentLength,
-          blobName: blob.name,
-          uploadedAt: blob.properties.lastModified.toISOString(),
-        });
-      }
-    }
-    return blobs;
-  } catch (error) {
-    console.error('❌ Error listando documentos:', error.message);
+  const res = await fetch(`/api/documents?botId=${encodeURIComponent(botId)}`);
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    console.error('❌ listDocuments:', data.error);
     return [];
   }
+
+  return data;
 }
