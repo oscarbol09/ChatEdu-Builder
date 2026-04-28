@@ -2,26 +2,36 @@
  * @fileoverview Zona de carga de archivos del Paso 1 del wizard.
  * Soporta drag & drop y selección mediante diálogo del sistema.
  *
- * CAMBIOS (v0.4.0) — Lectura real de contenido:
- * - Archivos .txt y .md: se leen como texto usando FileReader y su contenido
- *   se almacena en el campo `content` de los metadatos del archivo.
- *   Este contenido luego se inyecta en el system prompt de Gemini (geminiApi.js),
- *   lo que permite al chatbot responder con base en el material real del docente.
- * - Archivos .pdf y .docx: no son parseables en el browser sin librerías pesadas.
- *   Se marcan como `status: 'pending_extraction'` para indicar que en producción
- *   deben procesarse en el servidor (Azure Functions + Apache Tika / pdfjs).
- *   El chatbot funciona sin su contenido, pero no tendrá contexto específico de esos archivos.
- * - El tamaño real del archivo se usa en lugar de un número aleatorio.
- * - Se muestra un indicador diferente según si el contenido fue extraído o no.
+ * CAMBIOS (v1.0.0) — Extracción real vía Azure Functions (Paso 2):
+ * - PDF y DOCX: se suben al backend (/api/documents) que extrae el texto
+ *   con pdf-parse / mammoth y lo devuelve en `extractedText`.
+ *   El resultado se almacena en `file.content` para que Builder.jsx lo
+ *   inyecte al system prompt de Gemini a través de ChatPreview → useChat.
+ * - TXT y MD: se siguen leyendo localmente con FileReader (sin round-trip
+ *   al servidor, ya que el browser puede leerlos directamente).
+ * - Estados posibles por archivo:
+ *     uploading         → subiendo al servidor (spinner)
+ *     ready             → texto disponible y listo para el chatbot
+ *     empty             → subido OK, pero el PDF era solo imagen (sin capa de texto)
+ *     error             → fallo de red o extracción imposible
+ * - El botón "Siguiente" del wizard se bloquea mientras haya archivos en
+ *   estado 'uploading' (gestionado en Builder.jsx a través de canNext()).
+ *   Para ello, se expone el flag `isUploading` vía prop onUploadingChange.
+ *
+ * CONTRATO CON Builder.jsx (sin cambios necesarios en Builder):
+ * - onAdd(meta)    → meta.content contiene el texto extraído (string | null).
+ * - onRemove(id)   → elimina el archivo de la lista.
+ * - files[]        → array de metadatos gestionado por Builder como estado.
  */
 
 import { useState, useRef } from 'react';
+import { uploadDocument } from '../../services/storage.js';
 import styles from './UploadZone.module.css';
 
 /** Tipos de archivo aceptados. */
 const ACCEPTED_TYPES = '.pdf,.docx,.txt,.md';
 
-/** Extensiones cuyo contenido se puede leer directamente en el browser. */
+/** Extensiones que el browser puede leer directamente (sin round-trip al servidor). */
 const TEXT_EXTENSIONS = new Set(['.txt', '.md']);
 
 /**
@@ -46,7 +56,7 @@ function getExt(name = '') {
 }
 
 /**
- * Lee el contenido de un archivo de texto usando FileReader.
+ * Lee el contenido de un archivo de texto plano usando FileReader.
  * @param {File} file
  * @returns {Promise<string>}
  */
@@ -60,19 +70,53 @@ function readTextFile(file) {
 }
 
 /**
- * @param {Object} props
- * @param {Array<{id: number, name: string, size: string, status: string, content?: string}>} props.files
- * @param {(file: Object) => void} props.onAdd     - Callback al agregar un nuevo archivo.
- * @param {(id: number) => void}   props.onRemove  - Callback al eliminar un archivo de la lista.
+ * @param {Object}   props
+ * @param {Array}    props.files            - Lista de metadatos de archivos (estado en Builder).
+ * @param {string}   props.botId            - ID del bot activo (necesario para el upload al servidor).
+ * @param {Function} props.onAdd            - Callback al agregar un archivo: onAdd(meta).
+ * @param {Function} props.onRemove         - Callback al eliminar un archivo: onRemove(id).
+ * @param {Function} [props.onUploadingChange] - Notifica a Builder si hay uploads en curso: (bool) => void.
  */
-export default function UploadZone({ files, onAdd, onRemove }) {
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef(null);
+export default function UploadZone({ files, botId, onAdd, onRemove, onUploadingChange }) {
+  const [isDragging,    setIsDragging]    = useState(false);
 
   /**
-   * Procesa los archivos seleccionados:
-   * - Archivos de texto → lee el contenido con FileReader.
-   * - Otros formatos    → registra los metadatos y marca como pendiente de servidor.
+   * Conjunto de IDs de archivos cuyo upload todavía no ha terminado.
+   * Se usa para mostrar spinner individual y para bloquear "Siguiente" en Builder.
+   */
+  const [uploadingIds,  setUploadingIds]  = useState(new Set());
+  const fileInputRef = useRef(null);
+
+  /** Marca un archivo como "en progreso" y notifica a Builder. */
+  const markUploading = (id) => {
+    setUploadingIds((prev) => {
+      const next = new Set(prev).add(id);
+      onUploadingChange?.(next.size > 0);
+      return next;
+    });
+  };
+
+  /** Quita un archivo del conjunto de "en progreso" y notifica a Builder. */
+  const unmarkUploading = (id) => {
+    setUploadingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      onUploadingChange?.(next.size > 0);
+      return next;
+    });
+  };
+
+  /**
+   * Procesa cada archivo seleccionado:
+   *   - TXT / MD  → FileReader local → content listo inmediatamente.
+   *   - PDF / DOCX → uploadDocument() → backend extrae texto → content disponible
+   *                  cuando resuelve la promesa.
+   *
+   * En ambos casos se llama a onAdd() en cuanto tenemos los metadatos básicos
+   * (con status 'uploading' para PDF/DOCX) y luego se actualiza el registro
+   * con onAdd() de nuevo cuando llega la respuesta del servidor.
+   * Como Builder mantiene el array por id, el segundo onAdd sobrescribe el primero.
+   *
    * @param {FileList | File[]} fileList
    */
   const processFiles = async (fileList) => {
@@ -81,28 +125,64 @@ export default function UploadZone({ files, onAdd, onRemove }) {
     for (let i = 0; i < fileArray.length; i++) {
       const file = fileArray[i];
       const ext  = getExt(file.name);
-      const meta = {
-        id:     Date.now() + i,
-        name:   file.name,
-        size:   formatSize(file.size),
-        status: 'ready',
-        content: null, // contenido extraído (solo para texto)
-      };
+      const id   = Date.now() + i;
 
       if (TEXT_EXTENSIONS.has(ext)) {
-        // Leer el contenido real del archivo → se usará en el system prompt de Gemini.
+        // ── Texto plano: leer en el browser, sin servidor ──────────────────
+        const meta = {
+          id,
+          name:    file.name,
+          size:    formatSize(file.size),
+          status:  'ready',
+          content: null,
+        };
         try {
           meta.content = await readTextFile(file);
-          meta.status  = 'ready';
         } catch {
           meta.status = 'error';
         }
-      } else {
-        // PDF, DOCX: requieren procesamiento en servidor para extraer texto.
-        meta.status = 'pending_extraction';
-      }
+        onAdd(meta);
 
-      onAdd(meta);
+      } else {
+        // ── PDF / DOCX: subir al servidor y esperar extracción ─────────────
+
+        // 1. Registrar inmediatamente con estado 'uploading' para mostrar el spinner.
+        onAdd({
+          id,
+          name:    file.name,
+          size:    formatSize(file.size),
+          status:  'uploading',
+          content: null,
+        });
+        markUploading(id);
+
+        // 2. Upload asíncrono (no bloquea los demás archivos del lote).
+        uploadDocument(botId, file)
+          .then((result) => {
+            // result = { name, size, type, blobName, uploadedAt, extractedText, extractionStatus }
+            onAdd({
+              id,
+              name:    file.name,
+              size:    formatSize(file.size),
+              blobName: result.blobName,
+              status:  result.extractionStatus ?? 'ready',  // 'ready' | 'empty' | 'error'
+              content: result.extractedText ?? null,
+            });
+          })
+          .catch((err) => {
+            console.error(`❌ uploadDocument [${file.name}]:`, err.message);
+            onAdd({
+              id,
+              name:    file.name,
+              size:    formatSize(file.size),
+              status:  'error',
+              content: null,
+            });
+          })
+          .finally(() => {
+            unmarkUploading(id);
+          });
+      }
     }
   };
 
@@ -114,9 +194,26 @@ export default function UploadZone({ files, onAdd, onRemove }) {
 
   const handleFileInput = (e) => {
     processFiles(e.target.files);
-    // Resetear el input para permitir seleccionar el mismo archivo de nuevo.
-    e.target.value = '';
+    e.target.value = ''; // Permite seleccionar el mismo archivo de nuevo.
   };
+
+  // ─── Labels y tooltips por estado ──────────────────────────────────────────
+
+  const statusLabel = (status) => ({
+    uploading: '⏳ Subiendo…',
+    ready:     '✓ Listo',
+    empty:     '⚠ Sin texto',
+    error:     '✗ Error',
+  }[status] ?? status);
+
+  const statusTooltip = (status) => ({
+    uploading: 'Subiendo al servidor y extrayendo texto…',
+    ready:     'Texto extraído y listo para el chatbot',
+    empty:     'El PDF no contiene capa de texto (solo imágenes). El chatbot no podrá usarlo como contexto.',
+    error:     'No se pudo extraer el texto. El archivo fue guardado pero el chatbot no tendrá su contenido.',
+  }[status] ?? '');
+
+  // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div>
@@ -147,12 +244,9 @@ export default function UploadZone({ files, onAdd, onRemove }) {
         </svg>
         <p className={styles.dropTitle}>Arrastra archivos o haz clic para cargar</p>
         <p className={styles.dropHint}>PDF, DOCX, TXT, MD · Máx. 50 MB por archivo</p>
-        <p className={styles.dropHint} style={{ marginTop: '4px', fontSize: '11px' }}>
-          TXT y MD: el contenido se inyecta directamente al chatbot · PDF y DOCX: se requiere servidor para extraer texto
-        </p>
       </div>
 
-      {/* Lista de archivos cargados */}
+      {/* Lista de archivos */}
       {files.length > 0 && (
         <ul className={styles.fileList}>
           {files.map((f) => (
@@ -166,21 +260,16 @@ export default function UploadZone({ files, onAdd, onRemove }) {
                 <p className={styles.fileSize}>{f.size}</p>
               </div>
               <span
-                className={styles.fileStatus}
-                title={
-                  f.status === 'ready'               ? 'Contenido extraído y listo para el chatbot' :
-                  f.status === 'pending_extraction'  ? 'Requiere servidor para extraer texto (PDF/DOCX)' :
-                  f.status === 'error'               ? 'Error al leer el archivo' : ''
-                }
+                className={`${styles.fileStatus} ${styles[`status_${f.status}`] ?? ''}`}
+                title={statusTooltip(f.status)}
               >
-                {f.status === 'ready'              ? '✓ Listo' :
-                 f.status === 'pending_extraction' ? '⚠ Sin extracción' :
-                 f.status === 'error'              ? '✗ Error' : f.status}
+                {statusLabel(f.status)}
               </span>
               <button
                 className={styles.removeBtn}
                 onClick={(e) => { e.stopPropagation(); onRemove(f.id); }}
                 aria-label={`Eliminar ${f.name}`}
+                disabled={f.status === 'uploading'}
               >
                 ×
               </button>

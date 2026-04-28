@@ -1,16 +1,22 @@
 /**
  * @fileoverview Azure Function — Proxy para Azure Blob Storage (documentos).
  *
+ * v2.0.0 — Paso 2: Extracción real de texto (pdf-parse / mammoth).
+ *
  * Rutas expuestas:
- *   GET    /api/documents?botId={id}        → listDocuments
- *   POST   /api/documents                   → uploadDocument (multipart/form-data)
+ *   GET    /api/documents?botId={id}         → listDocuments
+ *   POST   /api/documents                    → uploadDocument + extracción de texto
  *   DELETE /api/documents/{botId}/{fileName} → deleteDocument
  *
- * NOTA — Extracción de PDF/DOCX (Paso 2):
- * El endpoint POST /api/documents subirá el archivo Y extraerá su texto
- * en la misma llamada, devolviendo { ...metadata, extractedText: string }.
- * La lógica de parseo (pdf-parse / mammoth) se añadirá en el Paso 2.
- * Por ahora se sube el binario y se devuelven solo los metadatos.
+ * FLUJO DE uploadDocument:
+ *   1. Recibe multipart/form-data con campos "file" (binario) y "botId".
+ *   2. Convierte el File a Buffer.
+ *   3. Llama a extractText(buffer, fileName) → string | null.
+ *   4. Sube el binario original a Blob Storage (preserva el archivo intacto).
+ *   5. Devuelve los metadatos + extractedText al cliente.
+ *      El cliente (UploadZone) almacena extractedText en su estado local y lo
+ *      pasa a useChat → sendChatMessage → /api/chat, que lo inyecta en el
+ *      system prompt de Gemini.
  *
  * La STORAGE_CONNECTION_STRING NUNCA sale del servidor.
  */
@@ -18,6 +24,7 @@
 import { app } from '@azure/functions';
 import { getStorageClients } from '../lib/storageClient.js';
 import { corsHeaders, handlePreflight } from '../lib/cors.js';
+import { extractText } from '../lib/extractor.js';
 
 // ─── GET /api/documents?botId={id} ────────────────────────────────────────────
 
@@ -32,7 +39,11 @@ app.http('listDocuments', {
     try {
       const botId = request.query.get('botId');
       if (!botId) {
-        return { status: 400, headers: corsHeaders(), body: JSON.stringify({ error: 'El parámetro botId es obligatorio.' }) };
+        return {
+          status:  400,
+          headers: corsHeaders(),
+          body:    JSON.stringify({ error: 'El parámetro botId es obligatorio.' }),
+        };
       }
 
       const { containerClient } = getStorageClients();
@@ -55,7 +66,7 @@ app.http('listDocuments', {
   },
 });
 
-// ─── POST /api/documents  (multipart/form-data: field "file" + field "botId") ──
+// ─── POST /api/documents  (multipart/form-data: "file" + "botId") ─────────────
 
 app.http('uploadDocument', {
   methods:   ['POST', 'OPTIONS'],
@@ -66,39 +77,59 @@ app.http('uploadDocument', {
     if (pre) return pre;
 
     try {
-      // Leer el body como FormData
       const formData = await request.formData();
       const botId    = formData.get('botId');
-      const file     = formData.get('file'); // Blob/File object en Azure Functions v4
+      const file     = formData.get('file'); // Web API File/Blob en Azure Functions v4
 
       if (!botId || !file) {
-        return { status: 400, headers: corsHeaders(), body: JSON.stringify({ error: 'Se requieren los campos botId y file.' }) };
+        return {
+          status:  400,
+          headers: corsHeaders(),
+          body:    JSON.stringify({ error: 'Se requieren los campos botId y file.' }),
+        };
       }
 
-      const { containerClient } = getStorageClients();
+      const fileName = file.name ?? `upload_${Date.now()}`;
 
-      // Asegurar que el contenedor existe (sin acceso público — privado por defecto)
+      // ── 1. Convertir a Buffer (necesario para pdf-parse y mammoth) ──────────
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer      = Buffer.from(arrayBuffer);
+
+      // ── 2. Extraer texto (no bloquea el upload si falla) ───────────────────
+      const extracted = await extractText(buffer, fileName);
+
+      const extractionStatus =
+        extracted === null   ? 'error'          :  // extracción falló
+        extracted === ''     ? 'empty'          :  // PDF solo-imagen u otro vacío
+                               'ready';             // texto disponible
+
+      context.log(
+        `📄 Extracción [${fileName}]: status=${extractionStatus}` +
+        (extracted ? ` (${extracted.length} chars)` : '')
+      );
+
+      // ── 3. Subir binario original a Blob Storage ───────────────────────────
+      const { containerClient } = getStorageClients();
       await containerClient.createIfNotExists();
 
-      const fileName       = file.name ?? `upload_${Date.now()}`;
-      const blobName       = `${botId}/${Date.now()}_${fileName}`;
+      const blobName        = `${botId}/${Date.now()}_${fileName}`;
       const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
-      const arrayBuffer = await file.arrayBuffer();
-      await blockBlobClient.uploadData(arrayBuffer, {
+      await blockBlobClient.uploadData(buffer, {
         blobHTTPHeaders: { blobContentType: file.type || 'application/octet-stream' },
       });
 
+      // ── 4. Responder con metadatos + texto extraído ────────────────────────
       const metadata = {
-        name:       fileName,
-        size:       file.size,
-        type:       file.type,
+        name:             fileName,
+        size:             file.size,
+        type:             file.type,
         blobName,
-        uploadedAt: new Date().toISOString(),
-        // extractedText: null  ← se añadirá en el Paso 2 (pdf-parse / mammoth)
+        uploadedAt:       new Date().toISOString(),
+        extractedText:    extracted,       // string | null
+        extractionStatus,                  // 'ready' | 'empty' | 'error'
       };
 
-      context.log(`📄 Documento subido: ${blobName}`);
       return { status: 201, headers: corsHeaders(), body: JSON.stringify(metadata) };
     } catch (err) {
       context.error('uploadDocument:', err.message);
@@ -120,13 +151,15 @@ app.http('deleteDocument', {
     try {
       const { botId, fileName } = request.params;
       if (!botId || !fileName) {
-        return { status: 400, headers: corsHeaders(), body: JSON.stringify({ error: 'Se requieren botId y fileName en la ruta.' }) };
+        return {
+          status:  400,
+          headers: corsHeaders(),
+          body:    JSON.stringify({ error: 'Se requieren botId y fileName en la ruta.' }),
+        };
       }
 
       const { containerClient } = getStorageClients();
-      // El blobName almacenado en metadatos incluye el prefijo botId/ y el timestamp.
-      // El cliente debe enviar el blobName completo como fileName o el nombre limpio.
-      // Intentamos ambas formas por compatibilidad.
+      // fileName puede llegar como blobName completo (con prefijo) o como nombre limpio.
       const blobName        = fileName.includes('/') ? fileName : `${botId}/${fileName}`;
       const blockBlobClient = containerClient.getBlockBlobClient(blobName);
       await blockBlobClient.delete();

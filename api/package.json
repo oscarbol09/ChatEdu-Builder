@@ -5,14 +5,19 @@
   "type": "module",
   "main": "src/functions/*.js",
   "scripts": {
-    "start": "func start",
-    "build": "echo 'No build step required for Node.js Azure Functions'"
+    "start":      "func start",
+    "build":      "echo 'No build step required for Node.js Azure Functions'",
+    "test":       "vitest run --config vitest.config.js",
+    "test:watch": "vitest --config vitest.config.js"
   },
   "dependencies": {
-    "@azure/cosmos": "^4.9.3",
-    "@azure/functions": "^4.5.0",
+    "@azure/cosmos":       "^4.9.3",
+    "@azure/functions":    "^4.5.0",
     "@azure/storage-blob": "^12.31.0",
-    "mammoth": "^1.8.0",
-    "pdf-parse": "^1.1.1"
+    "mammoth":             "^1.8.0",
+    "pdf-parse":           "^1.1.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.5"
   }
 }

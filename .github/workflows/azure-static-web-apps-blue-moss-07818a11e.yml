@@ -10,10 +10,47 @@ on:
       - main
 
 jobs:
+  # ── Job 1: Tests (frontend + backend) ─────────────────────────────────────
+  test_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Test Job
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ── Tests del frontend (Vitest + jsdom) ───────────────────────────────
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Run frontend tests
+        run: npm run test
+
+      # ── Tests del backend (Vitest, Node puro) ─────────────────────────────
+      - name: Install backend dependencies
+        working-directory: ./api
+        run: npm ci
+
+      - name: Run backend tests
+        working-directory: ./api
+        run: npm run test
+
+  # ── Job 2: Build & Deploy (solo si los tests pasan) ───────────────────────
   build_and_deploy_job:
+    needs: test_job   # ← el deploy solo ocurre si test_job termina en verde
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     name: Build and Deploy Job
+
     steps:
       - uses: actions/checkout@v3
         with:
@@ -23,23 +60,24 @@ jobs:
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
-        # Las variables VITE_* se inyectan en el build como variables de entorno.
-        # Agregar los valores reales como Secrets en:
-        # GitHub → tu repo → Settings → Secrets and variables → Actions
-        # ⚠️  NUNCA hardcodear valores reales aquí.
+        # CAMBIO (Paso 1 de seguridad):
+        # Las variables VITE_COSMOS_*, VITE_STORAGE_* y VITE_GEMINI_API_KEY
+        # fueron ELIMINADAS del frontend y del bundle. Ya NO deben estar aquí.
+        # Las credenciales viven en Application Settings de la Function App.
+        #
+        # Solo se inyecta VITE_ENABLE_TEST_ADMIN=false para asegurar que
+        # el bypass admin/admin esté desactivado en producción.
         env:
-          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
-          VITE_COSMOS_ENDPOINT: ${{ secrets.VITE_COSMOS_ENDPOINT }}
-          VITE_COSMOS_KEY: ${{ secrets.VITE_COSMOS_KEY }}
-          VITE_STORAGE_CONNECTION_STRING: ${{ secrets.VITE_STORAGE_CONNECTION_STRING }}
+          VITE_ENABLE_TEST_ADMIN: "false"
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_BLUE_MOSS_07818A11E }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
           app_location: "/"        # Raíz del código fuente React
-          api_location: ""         # Sin Azure Functions por ahora (a implementar)
+          api_location: "api"      # Azure Function App — migrada en Paso 1
           output_location: "build" # Debe coincidir con vite.config.js → build.outDir
 
+  # ── Job 3: Cerrar PR preview ───────────────────────────────────────────────
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest

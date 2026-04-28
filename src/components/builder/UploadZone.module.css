@@ -87,16 +87,43 @@
   margin: 0;
 }
 
+/* ── Badge de estado ─────────────────────────────────────────────────────── */
 .fileStatus {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: var(--radius-full);
-  background: var(--color-brand-teal-light);
-  color: var(--color-brand-teal-text);
   font-weight: 600;
   white-space: nowrap;
+  /* Color base (ready) */
+  background: var(--color-brand-teal-light);
+  color: var(--color-brand-teal-text);
 }
 
+/* Subiendo al servidor */
+.status_uploading {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+/* Listo — texto extraído correctamente */
+.status_ready {
+  background: var(--color-brand-teal-light);
+  color: var(--color-brand-teal-text);
+}
+
+/* PDF solo-imagen: subido pero sin texto extraíble */
+.status_empty {
+  background: #fefce8;
+  color: #a16207;
+}
+
+/* Error de red o extracción imposible */
+.status_error {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+/* ── Botón de eliminar ───────────────────────────────────────────────────── */
 .removeBtn {
   background: none;
   border: none;
@@ -106,9 +133,14 @@
   line-height: 1;
   padding: 4px;
   border-radius: var(--radius-sm);
-  transition: color 0.15s;
+  transition: color 0.15s, opacity 0.15s;
 }
 
-.removeBtn:hover {
+.removeBtn:hover:not(:disabled) {
   color: var(--color-text-secondary);
+}
+
+.removeBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }

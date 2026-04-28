@@ -48,6 +48,17 @@
   color: var(--color-text-secondary);
 }
 
+/* ── Hint de "procesando documentos" (Paso 2) ── */
+.uploadingHint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 8px 14px;
+}
+
 /* ── Navegación ── */
 .nav {
   display: flex;

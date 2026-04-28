@@ -1,5 +1,16 @@
 /**
  * @fileoverview Orquestador del wizard de creación/edición de chatbot (4 pasos).
+ *
+ * CAMBIOS (v1.0.0) — Paso 2: integración con extracción real de documentos:
+ * - Se pasa `botId` a UploadZone para que pueda llamar a /api/documents.
+ * - Se pasa `onUploadingChange` para bloquear "Siguiente" mientras haya
+ *   archivos PDF/DOCX en proceso de upload/extracción.
+ * - canNext() en el paso 0 también comprueba que no haya uploads activos.
+ * - onAdd ahora hace upsert por id: si el archivo ya existe (actualización
+ *   tras extracción), reemplaza; si no, añade. Esto evita duplicados cuando
+ *   UploadZone llama onAdd dos veces para el mismo archivo (estado 'uploading'
+ *   → estado 'ready' / 'error').
+ *
  * Recibe initialBot para modo edición (desde "Configurar") o null para creación nueva.
  */
 
@@ -13,25 +24,25 @@ import DeployPanel from './DeployPanel.jsx';
 import { DEFAULT_BOT_CONFIG } from '../../constants/index.js';
 
 /**
- * @param {Object} props
- * @param {Object|null} props.initialBot - Bot existente para editar, o null para crear nuevo.
- * @param {(config: Object, files: Array) => void} props.onFinish   - Callback al crear nuevo.
- * @param {(botId: string, config: Object, files: Array) => void} props.onUpdate - Callback al actualizar.
- * @param {() => void} props.onCancel
+ * @param {Object}        props
+ * @param {Object|null}   props.initialBot - Bot existente para editar, o null para crear nuevo.
+ * @param {Function}      props.onFinish   - Callback al crear nuevo: (config, files) => void.
+ * @param {Function}      props.onUpdate   - Callback al actualizar: (botId, config, files) => void.
+ * @param {Function}      props.onCancel
  */
 export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
-  const [step, setStep] = useState(0);
-  const [files, setFiles] = useState([]);
+  const [step,        setStep]        = useState(0);
+  const [files,       setFiles]       = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
 
   /**
    * ID temporal generado cuando se crea un bot nuevo y aún no tiene ID de Cosmos DB.
-   * Se usa en DeployPanel para construir la URL antes de que el bot sea guardado.
+   * Se usa en DeployPanel y como botId para el upload de documentos antes de guardar.
    * En modo edición, usamos el ID real del bot existente.
    */
   const [tempBotId] = useState(() => Date.now().toString());
   const activeBotId = initialBot?.id ?? tempBotId;
 
-  /** Si viene en modo edición, precargar los campos del bot existente. */
   const [config, setConfig] = useState(() => {
     if (initialBot) {
       return {
@@ -48,7 +59,6 @@ export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
 
   const isEditMode = Boolean(initialBot);
 
-  /** Carga los archivos del bot existente al editar. */
   useEffect(() => {
     if (initialBot?.files) {
       setFiles(initialBot.files);
@@ -57,7 +67,6 @@ export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
     }
   }, [initialBot]);
 
-  /** Sincroniza el formulario cuando cambia el bot a editar (navegación entre bots). */
   useEffect(() => {
     if (initialBot) {
       setConfig({
@@ -73,8 +82,26 @@ export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
     }
   }, [initialBot]);
 
+  /**
+   * Upsert por id: si el archivo ya existe (actualización tras extracción),
+   * lo reemplaza; si es nuevo, lo añade al final.
+   * Esto evita duplicados cuando UploadZone llama onAdd dos veces para el
+   * mismo archivo (estado 'uploading' → estado 'ready'/'error').
+   */
+  const handleAddFile = (newFile) => {
+    setFiles((prev) => {
+      const idx = prev.findIndex((f) => f.id === newFile.id);
+      if (idx !== -1) {
+        const updated = [...prev];
+        updated[idx] = newFile;
+        return updated;
+      }
+      return [...prev, newFile];
+    });
+  };
+
   const canNext = () => {
-    if (step === 0) return files.length > 0;
+    if (step === 0) return files.length > 0 && !isUploading;
     if (step === 1) return config.name.trim().length > 0;
     return true;
   };
@@ -119,9 +146,16 @@ export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
             </p>
             <UploadZone
               files={files}
-              onAdd={(f) => setFiles((prev) => [...prev, f])}
+              botId={activeBotId}
+              onAdd={handleAddFile}
               onRemove={(id) => setFiles((prev) => prev.filter((x) => x.id !== id))}
+              onUploadingChange={setIsUploading}
             />
+            {isUploading && (
+              <p className={styles.uploadingHint}>
+                ⏳ Procesando documentos… Espera a que todos estén listos antes de continuar.
+              </p>
+            )}
           </>
         )}
 
@@ -154,7 +188,6 @@ export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
             <p className={styles.stepDesc}>
               Obtén el enlace o el código de incrustación para integrarlo en tu LMS o sitio web.
             </p>
-            {/* botId pasa el ID real (edición) o el ID temporal (bot nuevo) */}
             <DeployPanel config={config} botId={activeBotId} />
           </>
         )}
