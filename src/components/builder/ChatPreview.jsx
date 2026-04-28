@@ -1,17 +1,23 @@
 /**
  * @fileoverview Vista previa del chat en vivo (Paso 3 del wizard).
  * Componente presentacional puro: delega toda la lógica a useChat.
+ *
+ * CAMBIOS (v0.4.0):
+ * - Recibe prop `documents` (array de strings con el contenido extraído de los
+ *   archivos .txt y .md subidos en el Paso 1) y lo pasa a useChat.
+ *   useChat lo reenvía a sendChatMessage para inyectarlo en el system prompt.
  */
 
 import styles from './ChatPreview.module.css';
 import { useChat } from '../../hooks/useChat.js';
 
 /**
- * @param {Object} props
- * @param {Object} props.config - Configuración activa del chatbot.
+ * @param {Object}   props
+ * @param {Object}   props.config    - Configuración activa del chatbot.
+ * @param {string[]} [props.documents] - Contenidos extraídos de los archivos subidos.
  */
-export default function ChatPreview({ config }) {
-  const { messages, input, loading, bottomRef, setInput, sendMessage } = useChat(config);
+export default function ChatPreview({ config, documents = [] }) {
+  const { messages, input, loading, bottomRef, setInput, sendMessage } = useChat(config, documents);
 
   return (
     <div className={styles.container}>

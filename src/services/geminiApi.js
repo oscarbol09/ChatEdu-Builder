@@ -13,15 +13,21 @@
  *   - 250 requests/día
  *   Suficiente para demos y presentaciones universitarias.
  *
+ * CAMBIOS (v0.4.0):
+ * - buildSystemPrompt ahora acepta un segundo parámetro `documents` (array de strings).
+ *   Si el docente subió archivos .txt o .md y se extrajo su contenido en UploadZone,
+ *   el texto se inyecta en el system prompt bajo la sección "Materiales del curso".
+ *   Esto permite al chatbot responder con base en el contenido real del docente,
+ *   sin necesidad de embeddings ni RAG en el backend.
+ *   Limitación conocida: el contexto de Gemini tiene un límite de tokens. Para
+ *   documentos muy grandes, el texto se trunca a MAX_DOC_CHARS por documento.
+ *
  * CAMBIOS (v0.3.4):
  * - sendChatMessage ahora recibe el historial completo de la conversación
  *   y lo mapea al formato multi-turn de Gemini (contents array).
- *   Esto elimina el bug donde el modelo respondía como si fuera el primer
- *   mensaje, repitiendo el saludo en cada turno.
- * - maxOutputTokens aumentado de 300 a 1024 para evitar respuestas cortadas.
- * - System prompt reescrito: menos restrictivo, más natural y profesional.
- *   Se eliminó "máximo 3 oraciones" y el "¡Hola!" implícito en el prompt.
- * - temperature subida a 0.9 para respuestas más fluidas y menos robóticas.
+ * - maxOutputTokens aumentado de 300 a 1024.
+ * - System prompt reescrito: más natural y profesional.
+ * - temperature subida a 0.9 para respuestas más fluidas.
  */
 
 import { GEMINI_MODEL } from '../constants/index.js';
@@ -30,11 +36,23 @@ import { GEMINI_MODEL } from '../constants/index.js';
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 /**
+ * Número máximo de caracteres por documento inyectado en el prompt.
+ * Gemini 2.5 Flash tiene ventana de ~1M tokens, pero limitar evita
+ * costos altos si se actualiza el modelo y la restricción cambia.
+ * ~8000 chars ≈ ~2000 tokens por documento.
+ */
+const MAX_DOC_CHARS = 8000;
+
+/**
  * Construye el system prompt pedagógico desde la configuración del chatbot.
- * @param {Object} config
+ * Si se proporcionan documentos con contenido extraído, los inyecta como
+ * sección de contexto para que el modelo los use en sus respuestas.
+ *
+ * @param {Object}   config    - Configuración del chatbot.
+ * @param {string[]} documents - Contenido textual de los archivos subidos (puede estar vacío).
  * @returns {string}
  */
-function buildSystemPrompt(config) {
+function buildSystemPrompt(config, documents = []) {
   const restriction = {
     strict:  'Responde únicamente sobre los temas de la asignatura. Si te preguntan algo fuera del tema, redirige amablemente.',
     guided:  'Puedes contextualizar con conocimiento general cuando sea útil para el aprendizaje.',
@@ -51,6 +69,16 @@ function buildSystemPrompt(config) {
   };
   const toneInstruction = toneMap[config.tone] ?? `Tono: ${config.tone}.`;
 
+  // Sección de documentos: se añade solo si hay contenido extraído disponible.
+  let documentSection = '';
+  const validDocs = documents.filter((d) => typeof d === 'string' && d.trim().length > 0);
+  if (validDocs.length > 0) {
+    const docTexts = validDocs
+      .map((d, i) => `--- Documento ${i + 1} ---\n${d.slice(0, MAX_DOC_CHARS)}${d.length > MAX_DOC_CHARS ? '\n[...truncado]' : ''}`)
+      .join('\n\n');
+    documentSection = `\n\nMATERIALES DEL CURSO (usa esta información como base para tus respuestas):\n${docTexts}\n--- Fin de los materiales ---`;
+  }
+
   return [
     `Eres ${config.name || 'un asistente educativo'}, un tutor especializado en ${config.subject || 'educación'} para estudiantes de nivel ${config.level || 'universitario'}.`,
     toneInstruction,
@@ -59,6 +87,7 @@ function buildSystemPrompt(config) {
     `Usa párrafos claros. Puedes usar listas cuando ayude a la claridad, pero evita el abuso de formato.`,
     restriction,
     config.welcome ? `Tu mensaje de bienvenida inicial fue: "${config.welcome}". No lo repitas, ya fue enviado.` : '',
+    documentSection,
   ].filter(Boolean).join(' ');
 }
 
@@ -80,14 +109,14 @@ function buildContents(history) {
 /**
  * Envía un mensaje al modelo Gemini con el historial completo de la conversación.
  *
- * @param {string} userMessage - Texto que el usuario envió al chat.
- * @param {Object} config      - Configuración activa del chatbot.
- * @param {Array}  history     - Historial completo de mensajes hasta ahora
- *                               (sin incluir userMessage, que se añade aquí).
+ * @param {string}   userMessage - Texto que el usuario envió al chat.
+ * @param {Object}   config      - Configuración activa del chatbot.
+ * @param {Array}    history     - Historial de mensajes hasta ahora (sin incluir userMessage).
+ * @param {string[]} [documents] - Contenido extraído de los documentos del docente.
  * @returns {Promise<string>} Texto de respuesta del modelo.
  * @throws {Error} Si la API key no está definida o la petición falla.
  */
-export async function sendChatMessage(userMessage, config, history = []) {
+export async function sendChatMessage(userMessage, config, history = [], documents = []) {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
   if (!apiKey) {
@@ -101,9 +130,6 @@ export async function sendChatMessage(userMessage, config, history = []) {
   const url = `${API_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
   // Construir el historial en formato Gemini + el nuevo mensaje del usuario.
-  // La API requiere que el array empiece con 'user' y alterne roles.
-  // Si el primer mensaje del historial es del bot (bienvenida), lo incluimos
-  // como 'model' para dar contexto sin romper la alternancia.
   const contents = [
     ...buildContents(history),
     { role: 'user', parts: [{ text: userMessage }] },
@@ -114,7 +140,7 @@ export async function sendChatMessage(userMessage, config, history = []) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       system_instruction: {
-        parts: [{ text: buildSystemPrompt(config) }],
+        parts: [{ text: buildSystemPrompt(config, documents) }],
       },
       contents,
       generationConfig: {

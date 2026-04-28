@@ -25,12 +25,14 @@ Plataforma no-code para crear, configurar y desplegar chatbots educativos contex
 
 ChatEdu Builder es una Single Page Application (SPA) construida con React + Vite. Su flujo principal es un asistente de 4 pasos:
 
-1. **Documentos** — El docente sube los materiales del curso (PDF, DOCX, TXT, MD). Los archivos se guardan en Azure Blob Storage.
+1. **Documentos** — El docente sube materiales del curso (PDF, DOCX, TXT, MD). Los archivos `.txt` y `.md` tienen su contenido extraído en el browser e inyectado directamente en el system prompt de Gemini. PDF y DOCX se listan como adjuntos pero requieren procesamiento en servidor (pendiente).
 2. **Configuración** — Define nombre, asignatura, nivel, tono y restricciones temáticas del chatbot.
-3. **Vista previa en vivo** — Interactúa con el bot antes de publicarlo. Las respuestas son generadas en tiempo real por `gemini-2.5-flash`.
+3. **Vista previa en vivo** — Interactua con el bot antes de publicarlo. Las respuestas son generadas en tiempo real por `gemini-2.5-flash`, con el contenido de los documentos como contexto cuando está disponible.
 4. **Despliegue** — Obtiene la URL directa y el código de iframe para integrar en cualquier LMS.
 
-El panel principal (Dashboard) permite visualizar, gestionar y consultar analíticas de todos los bots creados. Los bots se persisten en Azure Cosmos DB asociados al usuario propietario.
+El panel principal (Dashboard) permite visualizar y gestionar todos los bots creados. Los bots se persisten en `localStorage` del navegador. Azure Cosmos DB está preparado en el código pero no se usa desde el browser por restricciones de CORS; su activación requiere mover la lógica a Azure Functions.
+
+> **Estado actual:** prototipo funcional. El chat con IA, la inyección de documentos de texto, el sistema de bots y el link público funcionan completamente. La autenticación es un stub demo (reemplazable por Entra ID), la analítica muestra datos simulados y la subida a Blob Storage no está activa.
 
 ---
 
@@ -211,10 +213,10 @@ chatedu-builder/
 - Acceso directo a analítica o configuración.
 
 ### Builder (wizard de 4 pasos)
-- **Paso 1:** Zona de arrastre con soporte para `.pdf`, `.docx`, `.txt`, `.md`. Subida a Azure Blob Storage.
+- **Paso 1:** Zona de arrastre con soporte para `.pdf`, `.docx`, `.txt`, `.md`. Los archivos `.txt` y `.md` son leídos en el browser y su contenido se inyecta en el system prompt de Gemini, permitiendo respuestas contextualizadas sin RAG ni backend. PDF y DOCX requieren procesamiento en servidor para extraer texto (pendiente).
 - **Paso 2:** Formulario completo: nombre, asignatura, nivel, tono, mensaje de bienvenida y restricción temática.
-- **Paso 3:** Chat en vivo conectado a la API de Gemini. Soporte multi-turno con historial de conversación.
-- **Paso 4:** Generación de URL directa y código de iframe para integración en LMS.
+- **Paso 3:** Chat en vivo conectado a la API de Gemini. Soporte multi-turno con historial de conversación. Contexto de documentos inyectado cuando está disponible.
+- **Paso 4:** Generación de URL directa y código de iframe para integración en LMS. La config del bot viaja codificada en Base64 en la URL, lo que garantiza que el chatbot funcione aunque Cosmos DB no esté configurada.
 
 ### Analytics
 - KPIs: consultas totales, documentos base, duración promedio, tasa de satisfacción.
@@ -298,12 +300,15 @@ La interfaz del contexto (`login`, `register`, `logout`, `user`, `isAuthenticate
 
 ## Persistencia de bots
 
-### Cómo funciona (v0.2.0)
+### Cómo funciona (v0.4.x — estado real)
 
-1. Al iniciar sesión, `useBots.js` llama a `initDB()` para verificar/crear los contenedores.
-2. Se consulta `getBotsByUser(user.email)` que filtra los bots por el campo `userId`.
-3. Si la BD no está disponible, el hook cae a los datos de demo (`MOCK_BOTS`).
-4. Al crear o editar un bot, el documento se guarda en Cosmos DB y se actualiza el estado local.
+La persistencia ocurre únicamente en `localStorage` del navegador (clave `chatedu_bots`). Azure Cosmos DB está implementado en `db.js` pero no puede usarse desde el browser por restricciones de CORS de Azure.
+
+1. Al crear o editar un bot, `useBots.js` guarda el documento en `localStorage` inmediatamente.
+2. Al cargar la app, los bots del usuario activo se leen desde `localStorage` filtrados por `userId` (email).
+3. Si Cosmos DB estuviera disponible (entorno Node/servidor), el hook intentaría usarlo como primera fuente y caería a localStorage como respaldo.
+
+**Nota arquitectural:** para activar Cosmos DB, mover las funciones de `db.js` a una Azure Function con Managed Identity. El cliente solo debería llamar a `/api/bots/*`.
 
 ### Esquema del documento de bot en Cosmos DB
 

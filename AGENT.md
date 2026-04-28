@@ -1,3 +1,23 @@
+## Estado actual del proyecto (v0.4.x)
+
+Esta sección documenta lo que realmente está implementado frente a lo que es roadmap.
+
+| Funcionalidad | Estado | Nota |
+|---|---|---|
+| Chat con Gemini multi-turn | ✅ Implementado | `geminiApi.js` |
+| Inyección de documentos .txt/.md en prompt | ✅ Implementado | `UploadZone` + `geminiApi.js` |
+| Extracción de texto de PDF/DOCX | ❌ Pendiente servidor | Requiere Azure Functions + Tika |
+| Persistencia de bots | ✅ localStorage | Cosmos DB bloqueado por CORS en browser |
+| Persistencia de usuarios | ✅ localStorage | Cosmos DB bloqueado por CORS en browser |
+| Upload real a Azure Blob Storage | ❌ No activo | `storage.js` implementado pero sin Azure Functions de proxy |
+| Autenticación real | ❌ Stub demo | Reemplazar por Entra ID / MSAL |
+| Analítica real | ❌ Mock | Datos simulados en `mockData.js` |
+| ESLint funcional | ✅ `eslint.config.js` | Flat config para ESLint 9 |
+| Tests | ❌ No hay | A implementar |
+| CI que bloquee regresiones | ❌ No hay | Solo deploy automático |
+
+---
+
 # AGENT.md — ChatEdu Builder
 
 Instrucciones para agentes de IA (Claude Code, Copilot, Cursor, etc.) que trabajen sobre este repositorio.
@@ -125,11 +145,12 @@ Estas reglas no deben violarse bajo ningún pretexto. Cualquier PR que las incum
 | Variable | Requerida | Descripción |
 |---|---|---|
 | `VITE_GEMINI_API_KEY` | Sí | API key de Google Gemini. Gratuita en https://aistudio.google.com/apikey |
-| `VITE_COSMOS_ENDPOINT` | No* | Endpoint de Azure Cosmos DB. Sin esta variable, la app usa datos locales. |
+| `VITE_APP_URL` | No | URL base de la app para generar los enlaces del Paso 4. Si no se define, se usa `window.location.origin` automáticamente en runtime. |
+| `VITE_COSMOS_ENDPOINT` | No* | Endpoint de Azure Cosmos DB. Sin esta variable, la app usa localStorage. |
 | `VITE_COSMOS_KEY` | No* | Clave primaria de Azure Cosmos DB. |
-| `VITE_STORAGE_CONNECTION_STRING` | No* | Connection string de Azure Blob Storage. |
+| `VITE_STORAGE_CONNECTION_STRING` | No* | Connection string de Azure Blob Storage. Sin esta variable, la carga de archivos no sube al servidor. |
 
-*Opcionales en desarrollo local. La app cae automáticamente a datos mock si no están definidas.
+*Opcionales. En el browser, Cosmos DB siempre falla por CORS; la fuente de verdad para bots es localStorage. La variable está preparada para cuando la lógica migre a Azure Functions.
 
 **En producción:** registrar como Secrets en GitHub Actions. En el servidor (Azure Functions), usar Managed Identity en lugar de claves.
 

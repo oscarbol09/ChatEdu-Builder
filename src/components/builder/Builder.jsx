@@ -139,7 +139,12 @@ export default function Builder({ initialBot, onFinish, onUpdate, onCancel }) {
             <p className={styles.stepDesc}>
               Interactúa con tu chatbot antes de publicarlo. Las respuestas son generadas por IA en tiempo real.
             </p>
-            <ChatPreview config={config} />
+            <ChatPreview
+              config={config}
+              documents={files
+                .filter((f) => f.content)
+                .map((f) => f.content)}
+            />
           </>
         )}
 

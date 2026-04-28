@@ -5,14 +5,27 @@
  * siguiendo el principio de separación de responsabilidades (AGENT.md §4).
  * ChatPreview solo renderiza; useChat gestiona el estado y los efectos.
  *
+ * CAMBIOS (v0.3.5):
+ * - CORRECCIÓN DE BUG STRICTMODE: la versión anterior disparaba la llamada a
+ *   Gemini API dentro de la función updater de setMessages. React StrictMode
+ *   invoca los updaters dos veces en desarrollo, lo que causaba dos peticiones
+ *   por cada mensaje enviado. Ahora el flujo es:
+ *     1. Capturar el historial actual desde la ref (messagesRef).
+ *     2. Construir el array actualizado localmente.
+ *     3. Actualizar el estado con setMessages (una sola vez, sin efectos secundarios).
+ *     4. Llamar a la API fuera del updater, de forma secuencial y controlada.
+ *   Este patrón cumple con la regla de React: los updaters deben ser funciones
+ *   puras sin efectos secundarios.
+ * - Se añade messagesRef para mantener siempre el valor más reciente de messages
+ *   sin que el callback dependa de él en el array de dependencias de useCallback
+ *   (evita recreaciñón excesiva del callback).
+ *
  * CAMBIOS (v0.3.4):
- * - sendMessage ahora pasa el historial acumulado a sendChatMessage para
- *   habilitar conversaciones multi-turn. El modelo recibe todo el contexto
- *   anterior y no repite el saludo en cada turno.
+ * - sendMessage pasa el historial acumulado a sendChatMessage para habilitar
+ *   conversaciones multi-turn.
  * - El mensaje de bienvenida inicial NO se incluye en el historial enviado
- *   a Gemini (ya está declarado en el system prompt), evitando duplicación.
- * - Mejora de UX: el input se limpia y el loading comienza antes del await,
- *   dando feedback inmediato al usuario.
+ *   a Gemini (ya está declarado en el system prompt).
+ * - Mejora de UX: el input se limpia y el loading comienza antes del await.
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -31,7 +44,7 @@ import { sendChatMessage } from '../services/geminiApi.js';
  *   sendMessage: () => Promise<void>
  * }}
  */
-export function useChat(config) {
+export function useChat(config, documents = []) {
   // El mensaje de bienvenida es solo UI: no se envía a Gemini como historial.
   const welcomeText = config.welcome?.trim() || '¿En qué puedo ayudarte hoy?';
 
@@ -42,6 +55,17 @@ export function useChat(config) {
   const [loading, setLoading] = useState(false);
 
   const bottomRef = useRef(null);
+
+  /**
+   * Ref que siempre apunta al valor más reciente de messages.
+   * Permite leer el historial actual dentro de sendMessage sin añadir
+   * messages al array de dependencias de useCallback (lo que causaría
+   * que el callback se recreara en cada mensaje y perdiera referencia estable).
+   */
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,47 +78,31 @@ export function useChat(config) {
     setInput('');
     setLoading(true);
 
-    // Añadir el mensaje del usuario al estado de forma inmediata (feedback visual).
-    setMessages((prev) => {
-      const updated = [...prev, { role: 'user', text: userMsg }];
+    // 1. Construir el array actualizado localmente (sin setState todavía).
+    const newUserMsg    = { role: 'user', text: userMsg };
+    const updatedMsgs   = [...messagesRef.current, newUserMsg];
 
-      // Disparar la llamada a la API con el historial actualizado.
-      // Se usa la función de actualización de setState para leer el estado
-      // más reciente dentro del callback (evita closure stale).
-      _callApi(updated, userMsg, config).then((reply) => {
-        setMessages((curr) => [...curr, { role: 'bot', text: reply }]);
-        setLoading(false);
-      }).catch((err) => {
-        const errorText = err.message.includes('VITE_GEMINI_API_KEY')
-          ? 'Falta la API key de Gemini. Revisa la configuración del proyecto.'
-          : `Error: ${err.message}`;
-        setMessages((curr) => [...curr, { role: 'bot', text: errorText }]);
-        setLoading(false);
-      });
+    // 2. Actualizar el estado de forma pura (sin efectos secundarios dentro del updater).
+    setMessages(updatedMsgs);
 
-      return updated;
-    });
+    // 3. Construir el historial para la API:
+    //    - slice(1)   → excluir el mensaje de bienvenida (índice 0, ya está en system prompt).
+    //    - slice(0,-1) → excluir el último mensaje del usuario (se pasa como parámetro separado).
+    const historyForApi = updatedMsgs.slice(1).slice(0, -1);
+
+    // 4. Llamar a la API fuera del updater (no hay doble invocación en StrictMode).
+    try {
+      const reply = await sendChatMessage(userMsg, config, historyForApi, documents);
+      setMessages(curr => [...curr, { role: 'bot', text: reply }]);
+    } catch (err) {
+      const errorText = err.message.includes('VITE_GEMINI_API_KEY')
+        ? 'Falta la API key de Gemini. Revisa la configuración del proyecto.'
+        : `Error: ${err.message}`;
+      setMessages(curr => [...curr, { role: 'bot', text: errorText }]);
+    } finally {
+      setLoading(false);
+    }
   }, [input, loading, config]);
 
   return { messages, input, loading, bottomRef, setInput, sendMessage };
-}
-
-/**
- * Extrae la llamada a la API fuera del setState para evitar efectos secundarios
- * dentro de actualizaciones de estado de React.
- *
- * @param {Array}  fullHistory - Historial completo incluyendo el último mensaje del usuario.
- * @param {string} userMsg     - Texto del mensaje del usuario (último turno).
- * @param {Object} config      - Configuración del chatbot.
- * @returns {Promise<string>}
- */
-async function _callApi(fullHistory, userMsg, config) {
-  // El historial que enviamos a Gemini excluye:
-  // 1. El mensaje de bienvenida inicial (índice 0, rol 'bot') — ya está en system prompt.
-  // 2. El último mensaje del usuario — se pasa como parámetro separado.
-  const historyForApi = fullHistory
-    .slice(1)          // quitar bienvenida
-    .slice(0, -1);     // quitar el último mensaje (el que acabamos de añadir)
-
-  return sendChatMessage(userMsg, config, historyForApi);
 }
