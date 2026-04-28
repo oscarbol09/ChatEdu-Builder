@@ -12,6 +12,16 @@
  *   - 10 requests/minuto
  *   - 250 requests/día
  *   Suficiente para demos y presentaciones universitarias.
+ *
+ * CAMBIOS (v0.3.4):
+ * - sendChatMessage ahora recibe el historial completo de la conversación
+ *   y lo mapea al formato multi-turn de Gemini (contents array).
+ *   Esto elimina el bug donde el modelo respondía como si fuera el primer
+ *   mensaje, repitiendo el saludo en cada turno.
+ * - maxOutputTokens aumentado de 300 a 1024 para evitar respuestas cortadas.
+ * - System prompt reescrito: menos restrictivo, más natural y profesional.
+ *   Se eliminó "máximo 3 oraciones" y el "¡Hola!" implícito en el prompt.
+ * - temperature subida a 0.9 para respuestas más fluidas y menos robóticas.
  */
 
 import { GEMINI_MODEL } from '../constants/index.js';
@@ -25,25 +35,59 @@ const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
  * @returns {string}
  */
 function buildSystemPrompt(config) {
-  return (
-    `Eres ${config.name || 'un asistente educativo'}, ` +
-    `un chatbot pedagógico para la asignatura de ${config.subject || 'educación general'} ` +
-    `en nivel ${config.level || 'general'}. ` +
-    `Tono: ${config.tone || 'amigable'}. ` +
-    `Responde en español, de forma breve y educativa (máximo 3 oraciones). ` +
-    `No uses markdown con asteriscos.`
-  );
+  const restriction = {
+    strict:  'Responde únicamente sobre los temas de la asignatura. Si te preguntan algo fuera del tema, redirige amablemente.',
+    guided:  'Puedes contextualizar con conocimiento general cuando sea útil para el aprendizaje.',
+    open:    'Puedes responder sobre cualquier tema con libertad.',
+  }[config.restriction] ?? 'Puedes contextualizar con conocimiento general cuando sea útil.';
+
+  const toneMap = {
+    'Formal y académico':    'Usa un tono formal y académico.',
+    'Amigable y cercano':    'Usa un tono amigable y cercano, como un tutor que conoce bien al estudiante.',
+    'Socrático (preguntas)': 'Usa el método socrático: responde con preguntas que guíen al estudiante a descubrir la respuesta.',
+    'Conciso y directo':     'Sé conciso y directo. Ve al punto sin rodeos.',
+    'Motivacional':          'Usa un tono motivacional que aliente al estudiante a seguir aprendiendo.',
+    'Paso a paso (didáctico)': 'Explica paso a paso de forma didáctica, como si estuvieras en clase.',
+  };
+  const toneInstruction = toneMap[config.tone] ?? `Tono: ${config.tone}.`;
+
+  return [
+    `Eres ${config.name || 'un asistente educativo'}, un tutor especializado en ${config.subject || 'educación'} para estudiantes de nivel ${config.level || 'universitario'}.`,
+    toneInstruction,
+    `Responde siempre en español.`,
+    `Sé natural y conversacional: no repitas saludos en cada mensaje, no empieces siempre con "¡Hola!". Continúa la conversación de forma fluida según el contexto.`,
+    `Usa párrafos claros. Puedes usar listas cuando ayude a la claridad, pero evita el abuso de formato.`,
+    restriction,
+    config.welcome ? `Tu mensaje de bienvenida inicial fue: "${config.welcome}". No lo repitas, ya fue enviado.` : '',
+  ].filter(Boolean).join(' ');
 }
 
 /**
- * Envía un mensaje al modelo Gemini y devuelve la respuesta en texto.
+ * Convierte el historial interno del chat al formato multi-turn de Gemini.
+ * Gemini alterna roles 'user' y 'model'. El primer mensaje de bienvenida
+ * del bot se mapea como rol 'model' para establecer el contexto.
+ *
+ * @param {Array<{role: 'user'|'bot', text: string}>} history
+ * @returns {Array<{role: 'user'|'model', parts: [{text: string}]}>}
+ */
+function buildContents(history) {
+  return history.map((msg) => ({
+    role:  msg.role === 'user' ? 'user' : 'model',
+    parts: [{ text: msg.text }],
+  }));
+}
+
+/**
+ * Envía un mensaje al modelo Gemini con el historial completo de la conversación.
  *
  * @param {string} userMessage - Texto que el usuario envió al chat.
- * @param {Object} config - Configuración activa del chatbot.
+ * @param {Object} config      - Configuración activa del chatbot.
+ * @param {Array}  history     - Historial completo de mensajes hasta ahora
+ *                               (sin incluir userMessage, que se añade aquí).
  * @returns {Promise<string>} Texto de respuesta del modelo.
  * @throws {Error} Si la API key no está definida o la petición falla.
  */
-export async function sendChatMessage(userMessage, config) {
+export async function sendChatMessage(userMessage, config, history = []) {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
   if (!apiKey) {
@@ -56,23 +100,26 @@ export async function sendChatMessage(userMessage, config) {
 
   const url = `${API_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
+  // Construir el historial en formato Gemini + el nuevo mensaje del usuario.
+  // La API requiere que el array empiece con 'user' y alterne roles.
+  // Si el primer mensaje del historial es del bot (bienvenida), lo incluimos
+  // como 'model' para dar contexto sin romper la alternancia.
+  const contents = [
+    ...buildContents(history),
+    { role: 'user', parts: [{ text: userMessage }] },
+  ];
+
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      // System instruction: equivalente al system prompt de Anthropic
       system_instruction: {
         parts: [{ text: buildSystemPrompt(config) }],
       },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: userMessage }],
-        },
-      ],
+      contents,
       generationConfig: {
-        maxOutputTokens: 300,
-        temperature: 0.7,
+        maxOutputTokens: 1024,
+        temperature:     0.9,
       },
     }),
   });
