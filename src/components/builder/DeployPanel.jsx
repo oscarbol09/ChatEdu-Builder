@@ -9,11 +9,22 @@
  *   2. window.location.origin en runtime (funciona automáticamente en cualquier
  *      despliegue de Azure Static Web Apps sin configuración adicional)
  *
- * Ruta del bot: /#/bot/{id}
+ * CORRECCIÓN (v0.3.2) — Config embebida en URL:
+ * La versión anterior solo incluía el {id} del bot en la URL. Si Cosmos DB
+ * no está disponible (secrets no configurados en GitHub Actions) y el
+ * estudiante abre el enlace en una sesión nueva, localStorage está vacío
+ * y el bot aparece como "no encontrado".
+ *
+ * Solución: la URL ahora incluye la configuración esencial del bot codificada
+ * en Base64 como query param `?d=`. ChatbotPublic la lee como tercer fallback.
+ * Orden de resolución en ChatbotPublic:
+ *   1. Cosmos DB (si disponible)
+ *   2. localStorage del docente (si misma sesión)
+ *   3. Query param ?d= (siempre disponible, embebido en la URL)
+ *
+ * Ruta del bot: /#/bot/{id}?d={base64config}
  *   El hash (#) permite que Azure Static Web Apps sirva la ruta correctamente
  *   sin necesitar configuración de rewrite en staticwebapp.config.json.
- *   El parámetro `id` es el ID real del bot en Cosmos DB (o el ID temporal
- *   generado en el hook useBots para bots sin persistencia aún).
  */
 
 import { useState } from 'react';
@@ -55,6 +66,28 @@ function resolveBaseUrl() {
 }
 
 /**
+ * Codifica la configuración esencial del bot en Base64 para incrustarla en la URL.
+ * Solo incluye los campos que ChatbotPublic necesita para renderizar el chat.
+ * @param {Object} config
+ * @returns {string} Base64 URL-safe
+ */
+function encodeConfig(config) {
+  const payload = {
+    name:        config.name        || '',
+    subject:     config.subject     || '',
+    level:       config.level       || '',
+    tone:        config.tone        || '',
+    welcome:     config.welcome     || '',
+    restriction: config.restriction || 'guided',
+  };
+  try {
+    return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  } catch {
+    return '';
+  }
+}
+
+/**
  * @param {Object} props
  * @param {Object} props.config   - Configuración activa del chatbot.
  * @param {string} props.config.name - Nombre del chatbot.
@@ -65,11 +98,14 @@ export default function DeployPanel({ config, botId }) {
   const baseUrl = resolveBaseUrl();
   const slug    = toSlug(config.name) || 'mi-bot';
 
-  // La ruta usa hash routing (#) para compatibilidad con Azure Static Web Apps
-  // sin necesitar staticwebapp.config.json con reglas de fallback.
-  // Formato: {baseUrl}/#/bot/{botId o slug}
+  // Configuración del bot embebida en Base64 como query param.
+  // Esto garantiza que el chatbot funcione aunque Cosmos DB no esté disponible.
+  const encodedConfig = encodeConfig(config);
+  const configParam   = encodedConfig ? `?d=${encodedConfig}` : '';
+
+  // Formato: {baseUrl}/#/bot/{botId o slug}?d={base64config}
   const botPath   = botId ? botId : slug;
-  const directUrl = `${baseUrl}/#/bot/${botPath}`;
+  const directUrl = `${baseUrl}/#/bot/${botPath}${configParam}`;
   const embedCode = `<iframe src="${directUrl}" width="400" height="600" frameborder="0" title="${config.name || 'Chatbot educativo'}"></iframe>`;
 
   const [copied, setCopied] = useState(null);

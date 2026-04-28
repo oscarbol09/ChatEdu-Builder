@@ -4,14 +4,17 @@
  * Esta es la vista que ven los ESTUDIANTES cuando acceden al link generado
  * en el Paso 4 del wizard. NO requiere login.
  *
- * Ruta: /#/bot/:id
+ * Ruta: /#/bot/:id?d={base64config}
  *
  * Flujo de carga:
  *   1. Lee el :id del hash de la URL
  *   2. Busca el bot en Cosmos DB (getBotById)
- *   3. Si no lo encuentra (o no hay DB), muestra el bot en modo demo
- *      con la config guardada en localStorage como fallback
- *   4. Renderiza el chat en pantalla completa
+ *   3. Si no lo encuentra (o no hay DB), busca en localStorage del docente
+ *   4. Si tampoco, decodifica el query param ?d= (config embebida en la URL)
+ *   5. Si ninguno, muestra "Chatbot no encontrado"
+ *
+ * El fallback ?d= garantiza que el chat funcione aunque Cosmos DB no esté
+ * configurada, ya que la configuración viaja codificada en la propia URL.
  *
  * Diseño: pantalla completa optimizada para iframe y acceso directo.
  * No tiene sidebar, navbar ni ningún elemento de la app principal.
@@ -21,6 +24,30 @@ import { useState, useEffect } from 'react';
 import { useChat } from '../../hooks/useChat.js';
 import { getBotById } from '../../services/db.js';
 import styles from './ChatbotPublic.module.css';
+
+/**
+ * Decodifica la configuración embebida en el query param ?d= de la URL.
+ * El param contiene un JSON codificado en Base64.
+ * Nota: el hash # hace que el navegador no envíe el query al servidor,
+ * pero window.location.hash sí lo incluye después del #.
+ * Formato de hash: #/bot/123?d=BASE64
+ * @returns {Object|null}
+ */
+function decodeConfigFromUrl() {
+  try {
+    const hash = window.location.hash; // ej: "#/bot/1234?d=eyJuYW1lIjoiLi4uIn0="
+    const qIndex = hash.indexOf('?');
+    if (qIndex === -1) return null;
+    const queryStr = hash.slice(qIndex + 1); // "d=eyJuYW1lIjoiLi4uIn0="
+    const params = new URLSearchParams(queryStr);
+    const encoded = params.get('d');
+    if (!encoded) return null;
+    const json = decodeURIComponent(escape(atob(encoded)));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
 
 /* ── Indicador de escritura ─────────────────────────────────────────────── */
 function TypingIndicator() {
@@ -197,6 +224,15 @@ export default function ChatbotPublic({ botId }) {
         }
       } catch {
         // localStorage inaccesible
+      }
+
+      // Intento 3: config embebida en la URL como query param ?d=
+      // Generada por DeployPanel al crear el enlace. Funciona sin BD ni localStorage.
+      const urlConfig = decodeConfigFromUrl();
+      if (urlConfig && urlConfig.name) {
+        setConfig(urlConfig);
+        setLoading(false);
+        return;
       }
 
       // No encontrado en ninguna fuente
