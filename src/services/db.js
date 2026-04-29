@@ -1,16 +1,12 @@
 /**
  * @fileoverview Capa de acceso a Azure Cosmos DB — cliente React/Vite.
  *
- * v2.0.0 — Paso 4: Añade el Bearer token de MSAL a todas las peticiones
- * autenticadas hacia el backend.
+ * v2.1.0 — Fix dependencia circular (Paso 4).
  *
- * CAMBIO RESPECTO A v1.x:
- * Las peticiones a /api/bots y /api/users ahora incluyen el header
- * Authorization: Bearer <access_token> obtenido de MSAL de forma silenciosa.
- *
- * Si MSAL no está configurado (modo demo), las peticiones se envían sin token
- * y el middleware requireAuth del backend las acepta en entorno local
- * (NODE_ENV=development) o las rechaza en producción.
+ * CAMBIO v2.1 vs v2.0:
+ * getAccessToken() se movió a msalTokenHelper.js para romper el ciclo:
+ *   db.js → AuthContext.jsx → db.js  (❌ circular, rompe tests en CI)
+ *   db.js → msalTokenHelper.js       (✅ sin ciclo)
  *
  * Las firmas de todas las funciones exportadas son idénticas a v1.x.
  *
@@ -18,65 +14,17 @@
  * Este archivo sigue siendo el único punto de acceso a /api/bots y /api/users.
  */
 
-import { msalInstance } from '../auth/AuthContext.jsx';
-
-// ─── Scopes de acceso a la API ────────────────────────────────────────────────
-
-// Para llamadas al propio backend de SWA / Azure Functions:
-// El scope estándar para APIs protegidas con la misma aplicación Entra ID es
-// `api://<client-id>/<scope>`. Si no tienes scopes de API definidos,
-// usa el scope de Graph para autenticar la identidad del usuario.
-const API_SCOPES = import.meta.env.VITE_ENTRA_CLIENT_ID
-  ? [`api://${import.meta.env.VITE_ENTRA_CLIENT_ID}/user_impersonation`]
-  : [];
-
-// ─── Helper: obtener access token silenciosamente ─────────────────────────────
-
-/**
- * Obtiene el access token de MSAL de forma silenciosa para la cuenta activa.
- * Devuelve null si MSAL no está configurado o si no hay cuenta activa.
- *
- * @returns {Promise<string|null>}
- */
-async function getAccessToken() {
-  if (!msalInstance) return null;
-
-  const account = msalInstance.getActiveAccount()
-    ?? msalInstance.getAllAccounts()[0]
-    ?? null;
-
-  if (!account) return null;
-
-  try {
-    const result = await msalInstance.acquireTokenSilent({
-      scopes:  API_SCOPES.length > 0 ? API_SCOPES : ['openid', 'profile'],
-      account,
-    });
-    return result.accessToken ?? null;
-  } catch {
-    // Si el silent falla (token expirado, interacción requerida), devolver null.
-    // El backend responderá 401 y el usuario deberá re-autenticarse.
-    return null;
-  }
-}
+import { getAccessToken } from './msalTokenHelper.js';
 
 // ─── Helper: fetch autenticado ────────────────────────────────────────────────
 
-/**
- * Envuelve fetch con manejo de errores HTTP uniforme e inyección del token MSAL.
- *
- * @param {string}      url
- * @param {RequestInit} [options]
- * @returns {Promise<any>} JSON parseado de la respuesta.
- */
 async function apiFetch(url, options = {}) {
   const token = await getAccessToken();
-
   const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
 
   const res = await fetch(url, {
     headers: {
-      'Content-Type':  'application/json',
+      'Content-Type': 'application/json',
       ...authHeader,
       ...options.headers,
     },
@@ -94,24 +42,21 @@ async function apiFetch(url, options = {}) {
   return data;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Inicialización (mantenida por compatibilidad con useBots.js)
-// ═════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// Inicialización (no-op, conservada por compatibilidad)
+// ═══════════════════════════════════════════════════════
 
 export async function initDB() {
   return Promise.resolve();
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// SECCIÓN BOTS
-// ═════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// BOTS
+// ═══════════════════════════════════════════════════════
 
 export async function getBotsByUser(userId) {
   if (!userId) return [];
   try {
-    // El backend extrae el userId del token; el query param es ignorado
-    // en el backend con auth, pero lo conservamos para compatibilidad
-    // con el modo demo (backend sin auth).
     return await apiFetch(`/api/bots?userId=${encodeURIComponent(userId)}`);
   } catch (err) {
     console.error('❌ getBotsByUser:', err.message);
@@ -129,10 +74,7 @@ export async function getBots() {
 }
 
 export async function createBot(bot) {
-  return apiFetch('/api/bots', {
-    method: 'POST',
-    body:   JSON.stringify(bot),
-  });
+  return apiFetch('/api/bots', { method: 'POST', body: JSON.stringify(bot) });
 }
 
 export async function updateBot(id, updates) {
@@ -157,15 +99,12 @@ export async function getBotById(id) {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// SECCIÓN USUARIOS
-// ═════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// USUARIOS
+// ═══════════════════════════════════════════════════════
 
 export async function createUser(userData) {
-  return apiFetch('/api/users', {
-    method: 'POST',
-    body:   JSON.stringify(userData),
-  });
+  return apiFetch('/api/users', { method: 'POST', body: JSON.stringify(userData) });
 }
 
 export async function getUserByEmail(email) {
@@ -180,6 +119,5 @@ export async function getUserByEmail(email) {
 }
 
 export async function userExists(email) {
-  const user = await getUserByEmail(email);
-  return user !== null;
+  return (await getUserByEmail(email)) !== null;
 }

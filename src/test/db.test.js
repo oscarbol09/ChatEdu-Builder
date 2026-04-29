@@ -25,6 +25,14 @@ import {
   initDB,
 } from '../../services/db.js';
 
+// ── Mock de msalTokenHelper para que getAccessToken devuelva null
+// (sin sesión MSAL en tests unitarios) y no intente importar
+// @azure/msal-browser en el entorno jsdom. ────────────────────────────────
+vi.mock('../../services/msalTokenHelper.js', () => ({
+  getAccessToken: vi.fn().mockResolvedValue(null),
+  msalRef:        { instance: null },
+}));
+
 // ── Mock global de fetch ──────────────────────────────────────────────────
 
 /**

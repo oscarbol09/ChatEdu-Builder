@@ -48,6 +48,7 @@ import {
 } from '@azure/msal-browser';
 import { MsalProvider, useMsal } from '@azure/msal-react';
 import { getUserByEmail, createUser } from '../services/db.js';
+import { msalRef } from '../services/msalTokenHelper.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Constantes de rol (sin cambios respecto a v1.x)
@@ -77,6 +78,14 @@ const MSAL_ENABLED = Boolean(ENTRA_CLIENT_ID);
  */
 export let msalInstance = null;
 
+/**
+ * Promesa que resuelve cuando msalInstance está lista para usarse.
+ * @azure/msal-browser v3+ requiere llamar a initialize() antes de cualquier
+ * operación. Sin esto, accounts llega como objeto interno (no array) y
+ * provoca "e.filter is not a function" en el bundle minificado.
+ */
+export let msalInitPromise = Promise.resolve();
+
 if (MSAL_ENABLED) {
   msalInstance = new PublicClientApplication({
     auth: {
@@ -85,8 +94,6 @@ if (MSAL_ENABLED) {
       redirectUri: ENTRA_REDIRECT_URI,
     },
     cache: {
-      // sessionStorage: la sesión no persiste entre pestañas (más seguro).
-      // Cambiar a 'localStorage' si se necesita persistencia entre pestañas.
       cacheLocation:         'sessionStorage',
       storeAuthStateInCookie: false,
     },
@@ -94,12 +101,20 @@ if (MSAL_ENABLED) {
       loggerOptions: {
         loggerCallback: (level, message, containsPii) => {
           if (containsPii) return;
-          if (level === 0) console.error('[MSAL]', message);   // Error
-          if (level === 1) console.warn('[MSAL]', message);    // Warning
-          // Info y Verbose se omiten en producción.
+          if (level === 0) console.error('[MSAL]', message);
+          if (level === 1) console.warn('[MSAL]', message);
         },
       },
     },
+  });
+  // initialize() procesa el hash de redirección OAuth2 y prepara el caché
+  // interno. MsalProvider lo requiere antes de montar el árbol de React.
+  msalInitPromise = msalInstance.initialize().then(() => {
+    // Exponer la instancia inicializada al helper de token.
+    // Se hace aquí (post-initialize) para garantizar que el helper
+    // nunca use la instancia antes de que MSAL haya procesado el
+    // hash de redirección OAuth2.
+    msalRef.instance = msalInstance;
   });
 } else {
   console.warn(
