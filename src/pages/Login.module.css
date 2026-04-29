@@ -179,3 +179,82 @@
   color:      var(--color-text-muted, #6b7280);
   text-align: center;
 }
+
+/* ── Divisor "o" ─────────────────────────────────────────────────────────── */
+.divider {
+  display:       flex;
+  align-items:   center;
+  margin:         var(--space-5, 1.25rem) 0;
+  color:         var(--color-text-muted, #6b7280);
+  font-size:     0.75rem;
+}
+
+.divider::before,
+.divider::after {
+  content:      '';
+  flex:         1;
+  height:       1px;
+  background:   var(--color-border, #e2e4f0);
+}
+
+.divider span {
+  padding: 0 var(--space-3, 0.75rem);
+}
+
+/* ── Botón secundario (outline) ──────────────────────────────────────────── */
+.btnSecondary {
+  width:            100%;
+  padding:          var(--space-3, 0.75rem);
+  font-size:        0.9375rem;
+  font-weight:      600;
+  color:            var(--color-primary, #3d44a8);
+  background:       transparent;
+  border:           1px solid var(--color-primary, #3d44a8);
+  border-radius:    var(--radius-sm, 6px);
+  cursor:           pointer;
+  transition:       background 0.2s, color 0.2s;
+}
+
+.btnSecondary:hover {
+  background: var(--color-primary, #3d44a8);
+  color:      #ffffff;
+}
+
+/* ── Link "Volver" ─────────────────────────────────────────────────────────── */
+.linkBack {
+  background:    none;
+  border:        none;
+  color:         var(--color-primary, #3d44a8);
+  font-size:     0.875rem;
+  cursor:        pointer;
+  padding:        0;
+  margin-bottom:  var(--space-3, 0.75rem);
+  font-weight:   600;
+}
+
+.linkBack:hover {
+  text-decoration: underline;
+}
+
+/* ── Toggle mode (Iniciar sesión / Regístrate) ─────────────────────────────── */
+.toggleMode {
+  margin:      var(--space-4, 1rem) 0 0;
+  font-size:   0.875rem;
+  color:       var(--color-text-muted, #6b7280);
+  text-align:  center;
+}
+
+.toggleMode button {
+  background:     none;
+  border:         none;
+  color:          var(--color-primary, #3d44a8);
+  font-size:      inherit;
+  font-weight:    600;
+  cursor:         pointer;
+  padding:        0;
+  text-decoration: underline;
+}
+
+.toggleMode button:hover {
+  color: var(--color-primary-dark, #1b1f5e);
+}

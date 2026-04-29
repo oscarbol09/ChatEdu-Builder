@@ -300,39 +300,66 @@ function AuthProviderMsalInner({ children }) {
     };
   }, [instance]);
 
-  /**
-   * login() — abre el popup de Microsoft para autenticación interactiva.
-   * La firma es idéntica a v1.x para no romper Login.jsx.
-   */
-  const login = useCallback(async (_authData) => {
-    // En MSAL el flujo interactivo es completo: email, contraseña y MFA
-    // los gestiona Microsoft. Ignoramos _authData (email/password del form demo).
+/**
+ * login() — abre el popup de Microsoft para autenticación interactiva.
+ * La firma es idéntica a v1.x para no romper Login.jsx.
+ * Si provider='microsoft', usa MSAL. Si no, usa autenticación por BD (estudiantes/externos).
+ */
+const login = useCallback(async (authData = {}) => {
+  // Si provider es 'microsoft', usar MSAL
+  if (authData.provider === 'microsoft') {
     try {
       await instance.loginPopup({
         scopes:  LOGIN_SCOPES,
-        prompt:  'select_account', // Siempre muestra el selector de cuenta.
+        prompt:  'select_account',
       });
     } catch (err) {
-      // El usuario cerró el popup: no es un error grave.
       if (err.errorCode !== 'user_cancelled') throw err;
     }
-  }, [instance]);
+    return;
+  }
 
-  /**
-   * register() — en Entra ID no existe auto-registro.
-   * Conservamos la firma para no romper Login.jsx pero informamos al usuario.
-   */
-  const register = useCallback(async ({ role } = {}) => {
-    if (RESTRICTED_ROLES.has(role?.toLowerCase())) {
-      throw new Error(ROLE_RESTRICTION_MSG);
-    }
-    // Para roles no restringidos también redirigimos: el admin debe crear
-    // la cuenta en Azure AD antes de que el usuario pueda hacer login.
-    throw new Error(
-      'El registro automático no está disponible con autenticación institucional. ' +
-      'Contacte al administrador para obtener acceso.'
-    );
-  }, []);
+  // Autenticación por BD (estudiantes/externos)
+  const { email, role, password } = authData;
+  const userRecord = await getUserByEmail(email);
+  if (!userRecord) {
+    throw new Error('Credenciales inválidas.');
+  }
+  if (userRecord.password !== password) {
+    throw new Error('Credenciales inválidas.');
+  }
+  if (userRecord.role !== role) {
+    throw new Error(`Esta cuenta está registrada como ${userRecord.role}.`);
+  }
+  setUser({
+    email:    userRecord.email,
+    name:     userRecord.name,
+    role:     userRecord.role,
+    provider: 'email',
+  });
+  setDbReady(true);
+}, [instance]);
+
+/**
+ * register() — registro de estudiantes/externos en la BD local.
+ * Docentes no pueden registrarse (solo inicio via Microsoft).
+ */
+const register = useCallback(async ({ email, name, role }) => {
+  if (RESTRICTED_ROLES.has(role?.toLowerCase())) {
+    throw new Error(ROLE_RESTRICTION_MSG);
+  }
+  const existing = await getUserByEmail(email);
+  if (existing) {
+    throw new Error('Ya existe una cuenta con este correo.');
+  }
+  const newUser = await createUser({ email, name, role, password: 'temp' });
+  setUser({
+    email:    newUser.email,
+    name:     newUser.name,
+    role:     newUser.role,
+    provider: 'email',
+  });
+}, []);
 
   /**
    * logout() — cierra la sesión en MSAL y en Azure AD.
