@@ -302,9 +302,8 @@ function AuthProviderMsalInner({ children }) {
   }, [instance]);
 
 /**
- * login() — abre el popup de Microsoft para autenticación interactiva.
- * La firma es idéntica a v1.x para no romper Login.jsx.
- * Si provider='microsoft', usa MSAL. Si no, usa autenticación por BD (estudiantes/externos).
+ * login() — autenticación por Microsoft o BD.
+ * Retorna el objeto usuario para poder hacer redirección por rol.
  */
 const login = useCallback(async (authData = {}) => {
   // Si provider es 'microsoft', usar MSAL
@@ -317,7 +316,7 @@ const login = useCallback(async (authData = {}) => {
     } catch (err) {
       if (err.errorCode !== 'user_cancelled') throw err;
     }
-    return;
+    return null;
   }
 
   // Autenticación por BD (estudiantes/externos/docentes)
@@ -331,19 +330,21 @@ const login = useCallback(async (authData = {}) => {
   }
   // Usar el rol registrado en la BD
   const userRole = userRecord.role;
-  setCurrentUserEmail(userRecord.email);
-  setUser({
+  const user = {
     email:    userRecord.email,
     name:     userRecord.name,
     role:     userRole,
     provider: 'email',
-  });
+  };
+  setCurrentUserEmail(userRecord.email);
+  setUser(user);
   setDbReady(true);
+  return user;
 }, [instance]);
 
 /**
  * register() — registro de estudiantes/externos en la BD local.
- * Docentes no pueden registrarse (solo inicio via Microsoft).
+ * Retorna el usuario creado para redirección.
  */
 const register = useCallback(async ({ email, name, role, password }) => {
   if (RESTRICTED_ROLES.has(role?.toLowerCase())) {
@@ -355,14 +356,16 @@ const register = useCallback(async ({ email, name, role, password }) => {
   }
   const userPassword = password || Math.random().toString(36).slice(-8);
   const newUser = await createUser({ email, name, role, password: userPassword });
-  setCurrentUserEmail(newUser.email);
-  setUser({
+  const user = {
     email:    newUser.email,
     name:     newUser.name,
     role:     newUser.role,
     provider: 'email',
-  });
+  };
+  setCurrentUserEmail(newUser.email);
+  setUser(user);
   setDbReady(true);
+  return user;
 }, []);
 
   /**
