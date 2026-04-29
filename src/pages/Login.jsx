@@ -67,7 +67,7 @@ function UnifiedLogin() {
       if (user?.role === 'docente') {
         navigateTo('/');
       } else {
-        navigateTo('/');
+        navigateTo('/explore');
       }
     } catch (error) {
       setErr(error.message);

@@ -7,21 +7,23 @@
  *
  * Rutas manejadas:
  *   #/              → App principal (dashboard + builder)
+ *   #/explore       → Portal de estudiantes (catálogo de chatbots)
  *   #/bot/:id       → Vista pública del chatbot (sin login requerido)
  *
  * Uso:
  *   import { useHashRoute } from '../router/useHashRoute.js';
  *   const { route, params } = useHashRoute();
  *
- *   route === 'bot'  → params.id = 'abc123'
- *   route === 'app'  → vista principal
+ *   route === 'bot'    → params.id = 'abc123'
+ *   route === 'explore' → catálogo de chatbots
+ *   route === 'app'     → vista principal
  */
 
 import { useState, useEffect } from 'react';
 
 /**
  * Parsea el hash actual de la URL y devuelve { route, params }.
- * @returns {{ route: 'app' | 'bot', params: Record<string, string> }}
+ * @returns {{ route: string, params: Record<string, string> }}
  */
 function parseHash() {
   // window.location.hash es "#/bot/abc123" → quitamos el "#"
@@ -31,6 +33,11 @@ function parseHash() {
   const botMatch = hash.match(/^\/bot\/(.+)$/);
   if (botMatch) {
     return { route: 'bot', params: { id: decodeURIComponent(botMatch[1]) } };
+  }
+
+  // Ruta de exploración de estudiantes: /explore
+  if (hash === '/explore') {
+    return { route: 'explore', params: {} };
   }
 
   // Cualquier otra ruta → app principal

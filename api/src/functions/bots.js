@@ -27,6 +27,36 @@ app.http('getBots', {
     const pre = handlePreflight(request);
     if (pre) return pre;
 
+    // Verificar si es una solicitud de bots públicos
+    const url = new URL(request.url);
+    const isPublic = url.searchParams.get('public') === 'true';
+
+    // Si es pública, no requiere autenticación
+    if (isPublic) {
+      try {
+        const { botsContainer } = getCosmosClient();
+        const { resources } = await botsContainer.items
+          .query(
+            {
+              query:      'SELECT * FROM c WHERE c.published = true ORDER BY c.createdAt DESC',
+              parameters: [],
+            },
+            { enableCrossPartitionQuery: true }
+          )
+          .fetchAll();
+
+        return {
+          status:  200,
+          headers: corsHeaders(),
+          body:    JSON.stringify(resources),
+        };
+      } catch (err) {
+        context.error('getPublicBots:', err.message);
+        return { status: 500, headers: corsHeaders(), body: JSON.stringify({ error: err.message }) };
+      }
+    }
+
+    // Para bots privados, requiere autenticación
     const authError = requireAuth(request);
     if (authError) return authError;
 

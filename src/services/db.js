@@ -73,6 +73,15 @@ export async function getBotsByUser(userId) {
   }
 }
 
+export async function getPublicBots() {
+  try {
+    return await apiFetch('/api/bots?public=true');
+  } catch (err) {
+    console.error('❌ getPublicBots:', err.message);
+    return [];
+  }
+}
+
 export async function getBots() {
   try {
     return await apiFetch('/api/bots');

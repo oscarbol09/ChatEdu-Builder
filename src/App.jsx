@@ -35,14 +35,18 @@ import Analytics from './components/analytics/Analytics.jsx';
 import { AuthProvider, useAuth } from './auth/AuthContext.jsx';
 import Login from './pages/Login.jsx';
 import ChatbotPublic from './pages/bot/ChatbotPublic.jsx';
+import StudentPortal from './pages/StudentPortal.jsx';
 import { useHashRoute } from './router/useHashRoute.js';
 
 /**
- * Shell principal de la aplicación.
- * Solo se monta cuando el usuario está autenticado, por lo que
- * todos los hooks de estado pueden llamarse incondicionalmente.
+ * Redirección por rol: estudiantes van a /explore (StudentPortal)
  */
 function AppAuthenticated() {
+  const { user } = useAuth();
+  
+  // Docentes ven el dashboard normal, estudiantes ven StudentPortal
+  const isEstudiante = user?.role === 'estudiante';
+  
   const [view, setView] = useState('dashboard');
   const { bots, selectedBot, setSelectedBot, addBot, updateBot } = useBots();
 
@@ -80,6 +84,11 @@ function AppAuthenticated() {
     setBotToEdit(null);
     setView('dashboard');
   };
+
+  // Si es estudiante, mostrar portal de estudiantes
+  if (isEstudiante) {
+    return <StudentPortal />;
+  }
 
   return (
     <div className={styles.layout}>
