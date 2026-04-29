@@ -374,22 +374,22 @@ const register = useCallback(async ({ email, name, role, password }) => {
    * Si fue email, solo limpia el estado local.
    */
   const logout = useCallback(async () => {
-    // Verificar si hay cuenta activa en MSAL (usuario logueado con Microsoft)
-    const msalAccounts = instance.getAllAccounts();
-    const hasMicrosoftAccount = msalAccounts.length > 0;
-    
-    if (hasMicrosoftAccount) {
-      try {
-        await instance.logoutPopup();
-      } catch (err) {
-        console.warn('[AuthContext] logoutPopup falló:', err.message);
+    // Solo cerrar sesión Microsoft si el usuario efectivamente usó Microsoft
+    if (user?.provider === 'microsoft') {
+      const msalAccounts = instance.getAllAccounts();
+      if (msalAccounts.length > 0) {
+        try {
+          await instance.logoutPopup();
+        } catch (err) {
+          console.warn('[AuthContext] logoutPopup falló:', err.message);
+        }
       }
     }
     // Limpiar estado local (funciona para cualquier proveedor)
     setCurrentUserEmail(null);
     setUser(null);
     setDbReady(false);
-  }, [instance]);
+  }, [instance, user]);
 
   return (
     <AuthContext.Provider value={{

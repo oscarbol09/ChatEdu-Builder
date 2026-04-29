@@ -15,7 +15,6 @@
 import styles from './Sidebar.module.css';
 import { NAV_ITEMS } from '../../constants/index.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { navigateTo } from '../../router/useHashRoute.js';
 
 /**
  * Genera las iniciales a mostrar en el avatar.
@@ -66,7 +65,8 @@ export default function Sidebar({ activeView, onNavigate }) {
 
   const handleLogout = async () => {
     await logout();
-    navigateTo('/');
+    // Forzar navegación completa para resetear todo el estado de React
+    window.location.href = '/';
   };
 
   const initials = user?.name
