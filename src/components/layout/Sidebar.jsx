@@ -15,6 +15,7 @@
 import styles from './Sidebar.module.css';
 import { NAV_ITEMS } from '../../constants/index.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
+import { navigateTo } from '../../router/useHashRoute.js';
 
 /**
  * Genera las iniciales a mostrar en el avatar.
@@ -22,6 +23,7 @@ import { useAuth } from '../../auth/AuthContext.jsx';
  * @param {string} name - Nombre completo del usuario.
  * @returns {string} Iniciales en mayúsculas, ej: "DC", "AM", "U".
  */
+// eslint-disable-next-line no-unused-vars
 function getInitials(name = '') {
   if (!name) return 'U';
   return name
@@ -62,9 +64,17 @@ const NAV_ICONS = {
 export default function Sidebar({ activeView, onNavigate }) {
   const { user, logout } = useAuth();
 
-  const displayName = user?.name || user?.email?.split('@')[0] || 'Usuario';
-  const displaySub  = user?.email || user?.role || '';
-  const initials    = getInitials(displayName);
+  const handleLogout = async () => {
+    await logout();
+    navigateTo('/');
+  };
+
+  const initials = user?.name
+    ? user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    : user?.email?.[0]?.toUpperCase() || '?';
+
+  const displayName = user?.name || user?.email || 'Usuario';
+  const displaySub = user?.role === 'docente' ? 'Docente' : '';
 
   return (
     <aside className={styles.sidebar}>
@@ -104,7 +114,7 @@ export default function Sidebar({ activeView, onNavigate }) {
         </div>
         <button
           className={styles.logoutBtn}
-          onClick={logout}
+          onClick={handleLogout}
           title="Cerrar sesión"
           aria-label="Cerrar sesión"
         >

@@ -57,7 +57,7 @@ export default function StudentPortal() {
 
   const handleLogout = async () => {
     await logout();
-    navigateTo('/login');
+    navigateTo('/');
   };
 
   if (!user || user.role === 'docente') {
