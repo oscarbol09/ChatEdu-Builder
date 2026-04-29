@@ -123,10 +123,11 @@ function LoginEmailForm() {
     e.preventDefault();
     setErr('');
     if (!email.trim()) { setErr('Ingrese un correo electrónico.'); return; }
+    if (mode === 'register' && !password) { setErr('Ingrese una contraseña.'); return; }
     setLoading(true);
     try {
       if (mode === 'register') {
-        await register({ email: email.trim(), name: name.trim(), role });
+        await register({ email: email.trim(), name: name.trim(), role, password });
       } else {
         await login({ email: email.trim(), role, password });
       }
@@ -185,6 +186,16 @@ function LoginEmailForm() {
                 onChange={(e) => setName(e.target.value)}
                 autoComplete="name"
                 placeholder="Tu nombre completo" />
+            </div>
+
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="password">Contraseña</label>
+              <input id="password" type="password"
+                className={styles.input}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                placeholder="••••••••" />
             </div>
 
             <div className={styles.field}>

@@ -25,8 +25,8 @@ app.http('getUserByEmail', {
     const pre = handlePreflight(request);
     if (pre) return pre;
 
-    const authError = requireAuth(request);
-    if (authError) return authError;
+    // Esta ruta es pública para permitir login con email/password
+    // (estudiantes/externos) sin token Microsoft.
 
     try {
       const email = request.params.email;
@@ -62,8 +62,8 @@ app.http('createUser', {
     const pre = handlePreflight(request);
     if (pre) return pre;
 
-    const authError = requireAuth(request);
-    if (authError) return authError;
+    // Esta ruta es pública para permitir registro de estudiantes/externos
+    // sin token Microsoft.
 
     try {
       const userData = await request.json();

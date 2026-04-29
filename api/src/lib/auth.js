@@ -106,7 +106,10 @@ function decodeJwtPayload(token) {
 
 /**
  * Extrae el principal del llamador de la petición.
- * Prioridad: cabeceras SWA → Bearer token decodificado → null.
+ * Prioridad: 
+ *   1. Cabeceras SWA (producción con Microsoft)
+ *   2. Bearer token decodificado
+ *   3. Header X-User-Email (para estudiantes/externos autenticados por email)
  *
  * @param {import('@azure/functions').HttpRequest} request
  * @returns {CallerPrincipal|null}
@@ -118,16 +121,29 @@ export function getCallerPrincipal(request) {
 
   // 2. Bearer token (desarrollo local o llamadas directas)
   const token = extractBearerToken(request);
-  if (!token) return null;
+  if (token) {
+    const payload = decodeJwtPayload(token);
+    if (payload) {
+      return {
+        userId:      payload.oid ?? payload.sub ?? '',
+        userDetails: payload.preferred_username ?? payload.email ?? payload.upn ?? '',
+        name:        payload.name ?? payload.preferred_username ?? '',
+      };
+    }
+  }
 
-  const payload = decodeJwtPayload(token);
-  if (!payload) return null;
+  // 3. Header X-User-Email (estudiantes/externos autenticados por email en frontend)
+  // El frontend envía este header cuando el usuario hizo login con email/password
+  const emailHeader = request.headers.get('x-user-email');
+  if (emailHeader) {
+    return {
+      userId:      emailHeader,
+      userDetails: emailHeader,
+      name:        '',
+    };
+  }
 
-  return {
-    userId:      payload.oid ?? payload.sub ?? '',
-    userDetails: payload.preferred_username ?? payload.email ?? payload.upn ?? '',
-    name:        payload.name ?? payload.preferred_username ?? '',
-  };
+  return null;
 }
 
 /**

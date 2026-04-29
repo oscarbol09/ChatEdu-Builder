@@ -49,6 +49,7 @@ import {
 import { MsalProvider, useMsal } from '@azure/msal-react';
 import { getUserByEmail, createUser } from '../services/db.js';
 import { msalRef } from '../services/msalTokenHelper.js';
+import { setCurrentUserEmail } from '../services/db.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Constantes de rol (sin cambios respecto a v1.x)
@@ -331,6 +332,7 @@ const login = useCallback(async (authData = {}) => {
   if (userRecord.role !== role) {
     throw new Error(`Esta cuenta está registrada como ${userRecord.role}.`);
   }
+  setCurrentUserEmail(userRecord.email);
   setUser({
     email:    userRecord.email,
     name:     userRecord.name,
@@ -344,7 +346,7 @@ const login = useCallback(async (authData = {}) => {
  * register() — registro de estudiantes/externos en la BD local.
  * Docentes no pueden registrarse (solo inicio via Microsoft).
  */
-const register = useCallback(async ({ email, name, role }) => {
+const register = useCallback(async ({ email, name, role, password }) => {
   if (RESTRICTED_ROLES.has(role?.toLowerCase())) {
     throw new Error(ROLE_RESTRICTION_MSG);
   }
@@ -352,13 +354,16 @@ const register = useCallback(async ({ email, name, role }) => {
   if (existing) {
     throw new Error('Ya existe una cuenta con este correo.');
   }
-  const newUser = await createUser({ email, name, role, password: 'temp' });
+  const userPassword = password || Math.random().toString(36).slice(-8);
+  const newUser = await createUser({ email, name, role, password: userPassword });
+  setCurrentUserEmail(newUser.email);
   setUser({
     email:    newUser.email,
     name:     newUser.name,
     role:     newUser.role,
     provider: 'email',
   });
+  setDbReady(true);
 }, []);
 
   /**
@@ -372,6 +377,7 @@ const register = useCallback(async ({ email, name, role }) => {
       // Si el popup falla, limpiar el estado local igualmente.
       console.warn('[AuthContext] logoutPopup falló, limpiando estado local:', err.message);
     }
+    setCurrentUserEmail(null);
     setUser(null);
     setDbReady(false);
   }, [instance, accounts]);

@@ -16,16 +16,25 @@
 
 import { getAccessToken } from './msalTokenHelper.js';
 
+let currentUserEmail = null;
+
+export function setCurrentUserEmail(email) {
+  currentUserEmail = email;
+}
+
 // ─── Helper: fetch autenticado ────────────────────────────────────────────────
 
 async function apiFetch(url, options = {}) {
   const token = await getAccessToken();
   const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
 
+  const emailHeader = currentUserEmail ? { 'X-User-Email': currentUserEmail } : {};
+
   const res = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
       ...authHeader,
+      ...emailHeader,
       ...options.headers,
     },
     ...options,
