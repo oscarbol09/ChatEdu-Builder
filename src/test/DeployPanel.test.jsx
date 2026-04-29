@@ -11,7 +11,7 @@
  */
 
 import { render, screen, fireEvent } from '@testing-library/react';
-import DeployPanel from '../../components/builder/DeployPanel.jsx';
+import DeployPanel from '../components/builder/DeployPanel.jsx';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
 

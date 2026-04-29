@@ -14,15 +14,15 @@
  */
 
 import { renderHook, act } from '@testing-library/react';
-import { useChat } from '../../hooks/useChat.js';
+import { useChat } from '../hooks/useChat.js';
 
 // ── Mock de sendChatMessage ────────────────────────────────────────────────
 
-vi.mock('../../services/geminiApi.js', () => ({
+vi.mock('../services/geminiApi.js', () => ({
   sendChatMessage: vi.fn(),
 }));
 
-import { sendChatMessage } from '../../services/geminiApi.js';
+import { sendChatMessage } from '../services/geminiApi.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -185,14 +185,12 @@ describe('useChat — manejo de errores', () => {
     const { result } = renderHook(() => useChat(CONFIG));
 
     await act(async () => { result.current.setInput('Pregunta'); });
-    // No debe lanzar
-    await expect(
-      act(async () => { await result.current.sendMessage(); })
-    ).resolves.not.toThrow();
+    await act(async () => { await result.current.sendMessage(); });
+    await act(async () => { await new Promise(r => setTimeout(r, 100)); });
 
     const lastMsg = result.current.messages.at(-1);
     expect(lastMsg.role).toBe('bot');
-    expect(lastMsg.text).toContain('Timeout de red');
+    expect(lastMsg.text).toContain('Error: Timeout de red');
   });
 
   it('no hace nada si el input está vacío', async () => {

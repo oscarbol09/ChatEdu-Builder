@@ -11,7 +11,7 @@
  */
 
 import { renderHook, act } from '@testing-library/react';
-import { useHashRoute, navigateTo } from '../../router/useHashRoute.js';
+import { useHashRoute, navigateTo } from '../router/useHashRoute.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

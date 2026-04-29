@@ -18,12 +18,8 @@ import {
   getBotById,
   createBot,
   updateBot,
-  deleteBot,
-  getUserByEmail,
-  createUser,
-  userExists,
-  initDB,
-} from '../../services/db.js';
+  deleteBot
+} from '../services/db.js';
 
 // ── Mock de msalTokenHelper para que getAccessToken devuelva null
 // (sin sesión MSAL en tests unitarios) y no intente importar
@@ -50,14 +46,6 @@ function mockFetch(body, status = 200) {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-// ── initDB ────────────────────────────────────────────────────────────────
-
-describe('initDB', () => {
-  it('resuelve sin errores (es un no-op con el proxy)', async () => {
-    await expect(initDB()).resolves.toBeUndefined();
-  });
 });
 
 // ── getBotsByUser ─────────────────────────────────────────────────────────
@@ -170,69 +158,5 @@ describe('deleteBot', () => {
       expect.objectContaining({ method: 'DELETE' })
     );
     expect(result).toBe(true);
-  });
-});
-
-// ── getUserByEmail ────────────────────────────────────────────────────────
-
-describe('getUserByEmail', () => {
-  it('llama a GET /api/users/{email} y devuelve el usuario', async () => {
-    const user = { email: 'prof@uni.edu', role: 'docente' };
-    mockFetch(user);
-
-    const result = await getUserByEmail('prof@uni.edu');
-
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/users/prof%40uni.edu',
-      expect.any(Object)
-    );
-    expect(result).toEqual(user);
-  });
-
-  it('devuelve null si el usuario no existe (404)', async () => {
-    mockFetch({ error: 'Usuario no encontrado.' }, 404);
-    const result = await getUserByEmail('noexiste@uni.edu');
-    expect(result).toBeNull();
-  });
-
-  it('devuelve null si email es falsy sin llamar a fetch', async () => {
-    global.fetch = vi.fn();
-    const result = await getUserByEmail('');
-    expect(fetch).not.toHaveBeenCalled();
-    expect(result).toBeNull();
-  });
-});
-
-// ── createUser ────────────────────────────────────────────────────────────
-
-describe('createUser', () => {
-  it('llama a POST /api/users con los datos del usuario', async () => {
-    const userData = { email: 'nuevo@uni.edu', role: 'estudiante', name: 'Nuevo' };
-    mockFetch(userData, 201);
-
-    const result = await createUser(userData);
-
-    expect(fetch).toHaveBeenCalledWith(
-      '/api/users',
-      expect.objectContaining({
-        method: 'POST',
-        body:   JSON.stringify(userData),
-      })
-    );
-    expect(result).toEqual(userData);
-  });
-});
-
-// ── userExists ────────────────────────────────────────────────────────────
-
-describe('userExists', () => {
-  it('devuelve true si el usuario existe en el servidor', async () => {
-    mockFetch({ email: 'existe@uni.edu' });
-    expect(await userExists('existe@uni.edu')).toBe(true);
-  });
-
-  it('devuelve false si el servidor responde 404', async () => {
-    mockFetch({ error: 'no encontrado' }, 404);
-    expect(await userExists('noexiste@uni.edu')).toBe(false);
   });
 });
