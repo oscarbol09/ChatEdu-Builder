@@ -84,7 +84,7 @@ export default function UploadZone({ files, botId, onAdd, onRemove, onUploadingC
    * Conjunto de IDs de archivos cuyo upload todavía no ha terminado.
    * Se usa para mostrar spinner individual y para bloquear "Siguiente" en Builder.
    */
-  const [uploadingIds,  setUploadingIds]  = useState(new Set());
+  const [_uploadingIds, setUploadingIds]  = useState(new Set());
   const fileInputRef = useRef(null);
 
   /** Marca un archivo como "en progreso" y notifica a Builder. */
