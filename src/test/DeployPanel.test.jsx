@@ -59,7 +59,9 @@ describe('DeployPanel — generación de URLs', () => {
 
     expect(directUrlInput.value).toContain('?d=');
 
-    const decoded = decodeConfigParam(directUrlInput.value.replace('/#/bot/', '/'));
+    // _decoded: prefijo _ indica que el resultado no se usa directamente
+    // (la verificación se hace vía dParam más abajo)
+    const _decoded = decodeConfigParam(directUrlInput.value.replace('/#/bot/', '/'));
     // Reconstruimos la URL para que sea válida para el constructor URL():
     // La URL real tiene formato "http://localhost:3000/#/bot/ID?d=..."
     // Extraemos el ?d= manualmente:

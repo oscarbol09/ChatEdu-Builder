@@ -74,6 +74,7 @@ export default [
     languageOptions: {
       globals: {
         ...vitestPlugin.environments.env.globals,
+        global: 'readonly', // Node/jsdom: necesario para `global.fetch = vi.fn()` en tests
       },
     },
   },
