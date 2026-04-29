@@ -392,7 +392,7 @@ Para eliminar por completo las credenciales del cliente, la arquitectura recomen
 
 ---
 
-## Consideraciones de seguridad
+## Consideraciones de  seguridad
 
 - El archivo `.env` nunca debe subirse al repositorio (está en `.gitignore`).
 - Las variables `VITE_*` se incrustan en el bundle del cliente: **son visibles por el usuario final**. Solo usarlas en desarrollo local.
