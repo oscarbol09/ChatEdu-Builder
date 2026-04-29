@@ -320,8 +320,8 @@ const login = useCallback(async (authData = {}) => {
     return;
   }
 
-  // Autenticación por BD (estudiantes/externos)
-  const { email, role, password } = authData;
+  // Autenticación por BD (estudiantes/externos/docentes)
+  const { email, password } = authData;
   const userRecord = await getUserByEmail(email);
   if (!userRecord) {
     throw new Error('Credenciales inválidas.');
@@ -329,14 +329,13 @@ const login = useCallback(async (authData = {}) => {
   if (userRecord.password !== password) {
     throw new Error('Credenciales inválidas.');
   }
-  if (userRecord.role !== role) {
-    throw new Error(`Esta cuenta está registrada como ${userRecord.role}.`);
-  }
+  // Usar el rol registrado en la BD
+  const userRole = userRecord.role;
   setCurrentUserEmail(userRecord.email);
   setUser({
     email:    userRecord.email,
     name:     userRecord.name,
-    role:     userRecord.role,
+    role:     userRole,
     provider: 'email',
   });
   setDbReady(true);
