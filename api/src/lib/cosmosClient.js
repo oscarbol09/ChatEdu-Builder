@@ -5,6 +5,8 @@
  * (Application Settings en Azure, local.settings.json en local).
  * NUNCA se exponen al bundle del cliente React/Vite.
  *
+ * Soporta Variables con o sin prefijo VITE_ (Azure Static Web Apps).
+ *
  * En producción, reemplazar COSMOS_KEY por Managed Identity:
  *   new CosmosClient({ endpoint, aadCredentials: new DefaultAzureCredential() })
  * y eliminar COSMOS_KEY de Application Settings.
@@ -12,13 +14,20 @@
 
 import { CosmosClient } from '@azure/cosmos';
 
-const DATABASE_ID     = 'chatedu';
-const CONTAINER_BOTS  = 'bots';
-const CONTAINER_USERS = 'users';
+const DATABASE_ID     = process.env.COSMOS_DATABASE_ID     || 'chatedu';
+const CONTAINER_BOTS  = process.env.COSMOS_BOTS_CONTAINER  || 'bots';
+const CONTAINER_USERS = process.env.COSMOS_USERS_CONTAINER || 'users';
 
 let _client         = null;
 let _botsContainer  = null;
 let _usersContainer = null;
+
+/**
+ * Lee variable de entorno con soporte para prefijo VITE_
+ */
+function getEnvVar(name) {
+  return process.env[name] || process.env[`VITE_${name}`];
+}
 
 /**
  * Devuelve las referencias a los contenedores, inicializando el cliente
@@ -32,13 +41,13 @@ export function getCosmosClient() {
     return { botsContainer: _botsContainer, usersContainer: _usersContainer };
   }
 
-  const endpoint = process.env.COSMOS_ENDPOINT;
-  const key      = process.env.COSMOS_KEY;
+  const endpoint = getEnvVar('COSMOS_ENDPOINT');
+  const key      = getEnvVar('COSMOS_KEY');
 
   if (!endpoint || !key) {
     throw new Error(
       'COSMOS_ENDPOINT o COSMOS_KEY no están definidas en Application Settings. ' +
-      'En desarrollo local, agrégalas a api/local.settings.json.'
+      'En producción, agrégalas en Azure Static Web App → Variables de entorno.'
     );
   }
 

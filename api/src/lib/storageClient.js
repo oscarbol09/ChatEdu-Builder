@@ -2,6 +2,8 @@
  * @fileoverview Singleton del cliente Azure Blob Storage para el backend.
  *
  * La connection string se lee desde variables de entorno del servidor.
+ * Soporta Variables con o sin prefijo VITE_ (Azure Static Web Apps).
+ *
  * En producción, migrar a Managed Identity:
  *   new BlobServiceClient(`https://${account}.blob.core.windows.net`, new DefaultAzureCredential())
  * y eliminar STORAGE_CONNECTION_STRING de Application Settings.
@@ -10,6 +12,13 @@
 import { BlobServiceClient } from '@azure/storage-blob';
 
 export const CONTAINER_NAME = 'documents';
+
+/**
+ * Lee variable de entorno con soporte para prefijo VITE_
+ */
+function getEnvVar(name) {
+  return process.env[name] || process.env[`VITE_${name}`];
+}
 
 let _blobServiceClient = null;
 let _containerClient   = null;
@@ -26,11 +35,11 @@ export function getStorageClients() {
     return { blobServiceClient: _blobServiceClient, containerClient: _containerClient };
   }
 
-  const connectionString = process.env.STORAGE_CONNECTION_STRING;
+  const connectionString = getEnvVar('STORAGE_CONNECTION_STRING');
   if (!connectionString) {
     throw new Error(
       'STORAGE_CONNECTION_STRING no está definida en Application Settings. ' +
-      'En desarrollo local, agrégala a api/local.settings.json.'
+      'En producción, agrégalas en Azure Static Web App → Variables de entorno.'
     );
   }
 
